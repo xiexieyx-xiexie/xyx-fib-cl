@@ -9,9 +9,34 @@ import streamlit as st
 
 st.set_page_config(page_title="fib Chloride Ingress – Reliability", layout="wide")
 
-# ===== Titles =====
-st.title("fib Chloride Model – Parameters input")
-st.caption("Two-column layout matching the original Python GUI")
+# ===== Title =====
+st.title("fib Chloride induced corrosion Full probabilistic Model")
+st.caption("")
+
+# =============================
+# Helper: title with popovers
+# =============================
+def title_with_popovers(title: str, items: list[dict]):
+    """
+    Render a section title with small popover buttons to show images inline.
+
+    items: list of {"label": str, "image": str, "caption": Optional[str]}
+           - 'image' 
+    """
+    n = max(1, len(items))
+    cols = st.columns([0.78] + [0.22 / n] * n)
+    with cols[0]:
+        st.subheader(title)
+    for i, item in enumerate(items, start=1):
+        label = item.get("label", "Diagram")
+        src = item.get("image", "")
+        caption = item.get("caption", None)
+        with cols[i]:
+            with st.popover(f"🔗 {label}"):
+                if src:
+                    st.image(src, caption=caption, use_container_width=True)
+                else:
+                    st.info("Add an image path/URL in the code (see comments).")
 
 # =============================
 # Core math
@@ -147,10 +172,14 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True):
 left, right = st.columns(2)
 
 with left:
-    st.subheader("Model Parameters")
+    # ---- Ageing exponent section with popovers ----
+    title_with_popovers(
+        "Ageing exponent α preset",
+        items=[
+            {"label": "Reference", "image": "assets/alpha_diagram.png", "caption": "How to choose α"},
+    ],
+    )
 
-    # α preset (locked after choose)
-    st.markdown("**Ageing exponent α preset**")
     alpha_presets = {
         "Please select": None,
         "Portland Cement (PCC)": (0.30, 0.12, 0.0, 1.0),
@@ -161,18 +190,18 @@ with left:
     alpha_choice = st.selectbox("Ageing exponent α preset", list(alpha_presets.keys()), index=0)
 
     if alpha_presets[alpha_choice] is None:
-        alpha_mu = st.number_input("Ageing exponent α mean", value=0.65, step=0.01, format="%.6f")
-        alpha_sd = st.number_input("Ageing exponent α SD", value=0.12, step=0.01, format="%.6f")
-        alpha_L  = st.number_input("α lower bound L", value=0.0, step=0.01, format="%.6f")
-        alpha_U  = st.number_input("α upper bound U", value=1.0, step=0.01, format="%.6f")
+        alpha_mu = st.number_input("Ageing exponent α mean", value=0.65, step=0.01)
+        alpha_sd = st.number_input("Ageing exponent α SD", value=0.12, step=0.01)
+        alpha_L  = st.number_input("α lower bound L", value=0.0, step=0.01)
+        alpha_U  = st.number_input("α upper bound U", value=1.0, step=0.01)
     else:
         mu, sd, L, U = alpha_presets[alpha_choice]
-        alpha_mu = st.number_input("Ageing exponent α mean", value=float(mu), step=0.0, format="%.6f", disabled=True)
-        alpha_sd = st.number_input("Ageing exponent α SD", value=float(sd), step=0.0, format="%.6f", disabled=True)
-        alpha_L  = st.number_input("α lower bound L", value=float(L), step=0.0, format="%.6f", disabled=True)
-        alpha_U  = st.number_input("α upper bound U", value=float(U), step=0.0, format="%.6f", disabled=True)
+        alpha_mu = st.number_input("Ageing exponent α mean", value=float(mu), disabled=True)
+        alpha_sd = st.number_input("Ageing exponent α SD", value=float(sd), disabled=True)
+        alpha_L  = st.number_input("α lower bound L", value=float(L), disabled=True)
+        alpha_U  = st.number_input("α upper bound U", value=float(U), disabled=True)
 
-    # t0 (locked after choose)
+    # t0
     st.markdown("**Reference age t0 (yr)**")
     t0_options = {
         "Please select": None,
@@ -185,41 +214,40 @@ with left:
     st.text_input("", value=("" if t0_value is None else str(t0_value)), disabled=True, label_visibility="collapsed")
 
     # Ccrit (locked)
-    Ccrit_mu = st.number_input("Ccrit mean μ", value=0.60, step=0.01, format="%.6f", disabled=True)
-    Ccrit_sd = st.number_input("Ccrit SD σ", value=0.15, step=0.01, format="%.6f", disabled=True)
-    Ccrit_L  = st.number_input("Ccrit lower bound L", value=0.20, step=0.01, format="%.6f", disabled=True)
-    Ccrit_U  = st.number_input("Ccrit upper bound U", value=2.00, step=0.01, format="%.6f", disabled=True)
+    Ccrit_mu = st.number_input("Ccrit mean μ", value=0.60, disabled=True)
+    Ccrit_sd = st.number_input("Ccrit SD σ", value=0.15, disabled=True)
+    Ccrit_L  = st.number_input("Ccrit lower bound L", value=0.20, disabled=True)
+    Ccrit_U  = st.number_input("Ccrit upper bound U", value=2.00, disabled=True)
 
     # be (locked)
-    be_mu = st.number_input("Temperature coeff mean (b_e)", value=4800.0, step=0.0, format="%.6f", disabled=True)
-    be_sd = st.number_input("Temperature coeff SD (b_e)", value=700.0, step=0.0, format="%.6f", disabled=True)
+    be_mu = st.number_input("Temperature coeff mean (b_e)", value=4800.0, disabled=True)
+    be_sd = st.number_input("Temperature coeff SD (b_e)", value=700.0, disabled=True)
 
     st.divider()
     st.markdown("**Editable Parameters**")
+    C0    = st.number_input("Initial chloride C0 (wt-%/binder)", value=0.0, step=0.01)
+    Cs_mu = st.number_input("Surface chloride mean (wt-%/binder)", value=3.0, step=0.01)
+    Cs_sd = st.number_input("Surface chloride SD", value=0.5, step=0.01)
 
-    # Initial & Surface chloride
-    C0    = st.number_input("Initial chloride C0 (wt-%/binder)", value=0.0, step=0.01, format="%.6f")
-    Cs_mu = st.number_input("Surface chloride mean (wt-%/binder)", value=3.0, step=0.01, format="%.6f")
-    Cs_sd = st.number_input("Surface chloride SD", value=0.5, step=0.01, format="%.6f")
+    D0_mu = st.number_input("DRCM0 mean (×1e-12 m²/s)", value=8.0, step=0.1)
+    D0_sd = st.number_input("DRCM0 SD", value=1.5, step=0.1)
 
-    # D0
-    D0_mu = st.number_input("DRCM0 mean (×1e-12 m²/s)", value=8.0, step=0.1, format="%.6f")
-    D0_sd = st.number_input("DRCM0 SD", value=1.5, step=0.1, format="%.6f")
+    cover_mu = st.number_input("Cover mean (mm)", value=50.0, step=0.5)
+    cover_sd = st.number_input("Cover SD (mm)", value=8.0, step=0.5)
 
-    # Cover
-    cover_mu = st.number_input("Cover mean (mm)", value=50.0, step=0.5, format="%.6f")
-    cover_sd = st.number_input("Cover SD (mm)", value=8.0, step=0.5, format="%.6f")
-
-    # Temperatures
-    Treal_mu = st.number_input("Actual temperature mean (K)", value=302.0, step=0.5, format="%.6f")
-    Treal_sd = st.number_input("Actual temperature SD (K)", value=2.0, step=0.5, format="%.6f")
-    Tref     = st.number_input("Reference temperature Tref (K)", value=296.0, step=0.5, format="%.6f")
+    Treal_mu = st.number_input("Actual temperature mean (K)", value=302.0, step=0.5)
+    Treal_sd = st.number_input("Actual temperature SD (K)", value=2.0, step=0.5)
+    Tref     = st.number_input("Reference temperature Tref (K)", value=296.0, step=0.5)
 
 with right:
-    st.subheader("Δx, Plot Settings")
+    # ---- Δx section with popovers ----
+    title_with_popovers(
+        "Convection zone Δx",
+        items=[
+            {"label": "Reference",  "image": "assets/dx_modes.png",  "caption": "Δx option"},
+        ],
+    )
 
-    # Δx section
-    st.markdown("**Convection zone Δx**")
     dx_display_to_code = {
         "Please select": None,
         "Zero – submerged/spray (Δx = 0)": "zero",
@@ -229,35 +257,33 @@ with right:
     dx_choice = st.selectbox("Δx mode", list(dx_display_to_code.keys()), index=0)
     dx_code = dx_display_to_code[dx_choice]
 
-    # dx fields (locked unless editable)
     editable_dx = (dx_code == "beta_tidal")
-    dx_mu = st.number_input("Δx Beta mean μ (mm)", value=8.9, step=0.1, format="%.6f", disabled=not editable_dx)
-    dx_sd = st.number_input("Δx Beta SD σ (mm)", value=5.6, step=0.1, format="%.6f", disabled=not editable_dx)
-    dx_L  = st.number_input("Δx lower bound L (mm)", value=0.0, step=0.1, format="%.6f", disabled=not editable_dx)
-    dx_U  = st.number_input("Δx upper bound U (mm)", value=50.0, step=0.1, format="%.6f", disabled=not editable_dx)
+    dx_mu = st.number_input("Δx Beta mean μ (mm)", value=8.9, step=0.1, disabled=not editable_dx)
+    dx_sd = st.number_input("Δx Beta SD σ (mm)", value=5.6, step=0.1, disabled=not editable_dx)
+    dx_L  = st.number_input("Δx lower bound L (mm)", value=0.0, step=0.1, disabled=not editable_dx)
+    dx_U  = st.number_input("Δx upper bound U (mm)", value=50.0, step=0.1, disabled=not editable_dx)
 
     st.divider()
     st.markdown("**Time window & Monte Carlo**")
-    t_start_disp = st.number_input("Plot start time (yr)", min_value=0.0, value=0.9, step=0.1, format="%.4f")
-    t_end        = st.number_input("Plot end time (Target yr)", min_value=t_start_disp + 1e-6, value=50.0, step=1.0, format="%.4f")
+    t_start_disp = st.number_input("Plot start time (yr)", min_value=0.0, value=0.9, step=0.1)
+    t_end        = st.number_input("Plot end time (Target yr)", min_value=t_start_disp + 1e-6, value=50.0, step=1.0)
     t_points     = st.number_input("Number of time points", min_value=10, value=200, step=10)
     N            = st.number_input("Monte Carlo samples N", min_value=1000, value=100000, step=1000)
     seed         = st.number_input("Random seed", min_value=0, value=42, step=1)
 
     st.divider()
     st.markdown("**Axes controls (leave blank = auto) — RUN FIRST — Adjust only if graph not good**")
-    # Defaults exactly as your Python GUI showed
-    x_tick  = st.number_input("X tick step (years)", value=10.0, step=1.0, format="%.6f")
-    y1_min  = st.number_input("Y₁ = β min", value=-2.0, step=0.5, format="%.6f")
-    y1_max  = st.number_input("Y₁ = β max", value=5.0, step=0.5, format="%.6f")
-    y1_tick = st.number_input("Y₁ = β tick step", value=1.0, step=0.1, format="%.6f")
-    y2_min  = st.number_input("Y₂ = Pf min", value=0.0, step=0.01, format="%.6f")
-    y2_max  = st.number_input("Y₂ = Pf max", value=1.0, step=0.01, format="%.6f")
-    y2_tick = st.number_input("Y₂ = Pf tick step", value=0.1, step=0.01, format="%.6f")
+    x_tick  = st.number_input("X tick step (years)", value=10.0, step=1.0)
+    y1_min  = st.number_input("Y₁ = β min", value=-2.0, step=0.5)
+    y1_max  = st.number_input("Y₁ = β max", value=5.0, step=0.5)
+    y1_tick = st.number_input("Y₁ = β tick step", value=1.0, step=0.1)
+    y2_min  = st.number_input("Y₂ = Pf min", value=0.0, step=0.01)
+    y2_max  = st.number_input("Y₂ = Pf max", value=1.0, step=0.01)
+    y2_tick = st.number_input("Y₂ = Pf tick step", value=0.1, step=0.01)
 
     show_pf = st.checkbox("Show Pf (failure probability) curve", value=True)
 
-# ===== Run button centered like original =====
+# ===== Run button =====
 c1, c2, c3 = st.columns([1,2,1])
 with c2:
     run_button = st.button("Run Simulation", type="primary", use_container_width=True)
@@ -323,7 +349,7 @@ if run_button:
             params,
             N=int(N),
             seed=int(seed),
-            t_start=0.0,            # simulate from 0 to allow display windowing like original
+            t_start=0.0,
             t_end=float(t_end),
             t_points=int(t_points)
         )
@@ -345,7 +371,6 @@ if run_button:
         fig = plot_beta(df_window, t_end=float(t_end), axes_cfg=axes_cfg, show_pf=bool(show_pf))
         st.pyplot(fig, clear_figure=True)
 
-        # downloads & preview – same behavior as original (CSV saved)
         st.markdown("### Download")
         col_a, col_b = st.columns(2)
         with col_a:
