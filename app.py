@@ -307,7 +307,7 @@ if st.button("Run Simulation", type="primary"):
 
             "t0": float(t0), "Tref": float(Tref),
 
-            "C0": 0.0, "dx_mode": dx_mode
+            "C0": 0.05, "dx_mode": dx_mode
         }
         if dx_mode == "beta":
             params.update({
