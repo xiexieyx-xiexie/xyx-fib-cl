@@ -1,22 +1,31 @@
-import numpy as np, math, pandas as pd, matplotlib.pyplot as plt
-import streamlit as st
+# app.py
+import math
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 from scipy.stats import norm
 from scipy.special import erfc
+import streamlit as st
 
 st.set_page_config(page_title="fib Chloride Ingress – Reliability", layout="wide")
 st.title("fib chloride ingress – reliability index vs time")
 
-# ----------------------- Core math -----------------------
+# =============================
+# Core math
+# =============================
+
 def beta_from_pf(Pf):
     return -norm.ppf(Pf)
 
 def lognorm_from_mu_sd(rng, n, mu, sd):
+    """Sample lognormal given arithmetic mean mu and std sd."""
     sigma2 = math.log(1 + (sd**2) / (mu**2))
     mu_log = math.log(mu) - 0.5 * sigma2
     sigma = math.sqrt(sigma2)
     return rng.lognormal(mu_log, sigma, n)
 
 def beta01_shapes_from_mean_sd(mu, sd):
+    """Convert mean/sd on [0,1] to Beta(a,b) shapes with clamps for stability."""
     mu = max(min(mu, 1 - 1e-9), 1e-9)
     var = max(sd**2, 1e-12)
     t = mu * (1 - mu) / var - 1
@@ -25,6 +34,7 @@ def beta01_shapes_from_mean_sd(mu, sd):
     return a, b
 
 def beta_interval_from_mean_sd(rng, n, mu, sd, L, U):
+    """Sample Beta on [L, U] given arithmetic mean mu and sd on that interval."""
     if U <= L:
         raise ValueError("Upper bound must be greater than lower bound.")
     mu = max(min(mu, U - 1e-12), L + 1e-12)
@@ -34,10 +44,12 @@ def beta_interval_from_mean_sd(rng, n, mu, sd, L, U):
     a, b = beta01_shapes_from_mean_sd(mu01, sd01)
     return L + (U - L) * rng.beta(a, b, n)
 
-def run_fib_chloride(params, N=30000, seed=42, t_start=0.0, t_end=100.0, t_points=200):
+def run_fib_chloride(params, N=100000, seed=42, t_start=0.9, t_end=50.0, t_points=200):
+    """Simulate fib chloride ingress reliability over time. Returns DataFrame with t, Pf, beta."""
     rng = np.random.default_rng(seed)
     t_years = np.linspace(float(t_start), float(t_end), int(t_points))
 
+    # Unpack
     mu_Cs, sd_Cs       = params["Cs_mu"], params["Cs_sd"]
     mu_alpha, sd_alpha = params["alpha_mu"], params["alpha_sd"]
     alpha_L, alpha_U   = params["alpha_L"], params["alpha_U"]
@@ -49,20 +61,20 @@ def run_fib_chloride(params, N=30000, seed=42, t_start=0.0, t_end=100.0, t_point
     mu_Treal, sd_Treal = params["Treal_mu"], params["Treal_sd"]
     Tref, t0_year, C0  = params["Tref"], params["t0"], params["C0"]
 
-    # Δx mode
-    dx_mode = params["dx_mode"]  # "zero" or "beta"
+    # Δx modes
+    dx_mode = params["dx_mode"]  # one of: zero, beta_submerged, beta_tidal
     if dx_mode == "zero":
         dx_mm = np.zeros(N)
-    elif dx_mode == "beta":
+    elif dx_mode in ("beta_submerged", "beta_tidal"):
         dx_mm = beta_interval_from_mean_sd(
             rng, N,
             mu=params["dx_mu"], sd=params["dx_sd"],
             L=params["dx_L"], U=params["dx_U"]
         )
     else:
-        raise ValueError("dx_mode must be 'zero' or 'beta'.")
+        raise ValueError("dx_mode must be one of: zero, beta_submerged, beta_tidal")
 
-    # Samples
+    # Parameter distributions
     Cs = lognorm_from_mu_sd(rng, N, mu_Cs, sd_Cs)
     alpha = beta_interval_from_mean_sd(rng, N, mu_alpha, sd_alpha, alpha_L, alpha_U)
     Ccrit = beta_interval_from_mean_sd(rng, N, mu_Ccrit, sd_Ccrit, Ccrit_L, Ccrit_U)
@@ -72,11 +84,9 @@ def run_fib_chloride(params, N=30000, seed=42, t_start=0.0, t_end=100.0, t_point
     be = np.maximum(rng.normal(mu_be, sd_be, N), 1.0)
     Treal = np.maximum(rng.normal(mu_Treal, sd_Treal, N), 250.0)
 
-    # Constants
     t0_sec = t0_year * 365.25 * 24 * 3600.0
     temp_fac = np.exp(be * (1.0 / Tref - 1.0 / Treal))
 
-    # Time stepping
     Pf = []
     for t in t_years:
         t_sec = t * 365.25 * 24 * 3600.0
@@ -90,14 +100,14 @@ def run_fib_chloride(params, N=30000, seed=42, t_start=0.0, t_end=100.0, t_point
     return pd.DataFrame({"t_years": t_years, "Pf": Pf, "beta": beta})
 
 def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True):
-    x_abs = df_window["t_years"].to_numpy()   # absolute time
+    x_abs = df_window["t_years"].to_numpy()
     y_beta = df_window["beta"].to_numpy()
     y_pf   = df_window["Pf"].to_numpy()
 
     fig, ax1 = plt.subplots(figsize=(8, 5))
     ax1.plot(x_abs, y_beta, lw=2, label="β(t)")
-    ax1.set_xlabel("Time t (years)")
-    ax1.set_ylabel("Reliability index β(t)")
+    ax1.set_xlabel("Time (yr)")
+    ax1.set_ylabel("Reliability index β(-)")
     ax1.grid(True)
 
     ax2 = None
@@ -109,13 +119,11 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True):
     if axes_cfg is None:
         axes_cfg = {}
 
-    # X axis: 0 → t_end (absolute)
     ax1.set_xlim(0, float(t_end))
     x_tick = axes_cfg.get("x_tick", None)
     if x_tick is not None and x_tick > 0:
         ax1.set_xticks(np.arange(0, float(t_end) + 1e-12, x_tick))
 
-    # Left Y (β)
     y1_min = axes_cfg.get("y1_min", None)
     y1_max = axes_cfg.get("y1_max", None)
     y1_tick = axes_cfg.get("y1_tick", None)
@@ -125,7 +133,6 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True):
         ymin, ymax = ax1.get_ylim()
         ax1.set_yticks(np.arange(ymin, ymax + 1e-12, y1_tick))
 
-    # Right Y (Pf)
     if show_pf and ax2 is not None:
         y2_min = axes_cfg.get("y2_min", None)
         y2_max = axes_cfg.get("y2_max", None)
@@ -140,210 +147,218 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True):
     fig.tight_layout()
     return fig
 
-# ----------------------- UI helpers -----------------------
-def _parse_or_none(s: str):
-    s = s.strip()
-    return None if s == "" else float(s)
+# =============================
+# Sidebar – global controls
+# =============================
+with st.sidebar:
+    st.header("Time window & Monte Carlo")
+    t_start_disp = st.number_input("Plot start time (yr)", min_value=0.0, value=0.9, step=0.1, format="%.4f")
+    t_end = st.number_input("Plot end time (Target yr)", min_value=t_start_disp + 0.001, value=50.0, step=1.0, format="%.4f")
+    t_points = st.number_input("Number of time points", min_value=10, value=200, step=10)
+    N = st.number_input("Monte Carlo samples N", min_value=1000, value=100000, step=1000)
+    seed = st.number_input("Random seed", min_value=0, value=42, step=1)
+    show_pf = st.checkbox("Show Pf (failure probability) curve", value=True)
 
-# α presets with on-change autofill via session_state
-ALPHA_PRESETS = {
-    "Portland Cement (PCC)  (μ=0.30, σ=0.12, L=0, U=1)": (0.30, 0.12, 0.0, 1.0),
-    "PCC w/ ≥ 20% Fly Ash  (μ=0.60, σ=0.15, L=0, U=1)": (0.60, 0.15, 0.0, 1.0),
-    "PCC w/ Blast Furnace Slag  (μ=0.45, σ=0.20, L=0, U=1)": (0.45, 0.20, 0.0, 1.0),
-    "Normally used – All types (atmospheric)  (μ=0.65, σ=0.15, L=0, U=1)": (0.65, 0.15, 0.0, 1.0),
-}
-PRESET_NONE = "(none)"
+    st.markdown("---")
+    st.subheader("Axes controls (run first; adjust only if graph not good)")
+    # Defaults: x_tick=10; y1_min=-2; y1_max=5; y1_tick=1
+    x_tick = st.number_input("X tick step (years)", min_value=0.0, value=10.0, step=1.0)
+    y1_min = st.number_input("Y₁ = β min", value=-2.0, step=0.5, format="%.3f")
+    y1_max = st.number_input("Y₁ = β max", value=5.0, step=0.5, format="%.3f")
+    y1_tick = st.number_input("Y₁ = β tick step", min_value=0.0, value=1.0, step=0.1, format="%.3f")
+    y2_min = st.number_input("Y₂ = Pf min", value=0.0, step=0.01, format="%.6f")
+    y2_max = st.number_input("Y₂ = Pf max", value=1.0, step=0.01, format="%.6f")
+    y2_tick = st.number_input("Y₂ = Pf tick step", min_value=0.0, value=0.1, step=0.01, format="%.6f")
 
-def apply_alpha_preset():
-    sel = st.session_state.get("alpha_preset", PRESET_NONE)
-    if sel in ALPHA_PRESETS:
-        mu, sd, L, U = ALPHA_PRESETS[sel]
-        st.session_state["alpha_mu"] = mu
-        st.session_state["alpha_sd"] = sd
-        st.session_state["alpha_L"]  = L
-        st.session_state["alpha_U"]  = U
-
-# Initialize session_state defaults (so on_change can write into existing keys)
-for k, v in {
-    "alpha_mu": 0.65, "alpha_sd": 0.12, "alpha_L": 0.0, "alpha_U": 1.0,
-    "Cs_mu": 1.5, "Cs_sd": 1.1,
-    "D0_mu": 15.8, "D0_sd": 3.16,
-    "cover_mu": 55.0, "cover_sd": 6.0,
-    "be_mu": 4800.0, "be_sd": 700.0,
-    "Treal_mu": 288.0, "Treal_sd": 8.0,
-    "t0": 0.0767, "Tref": 296.0,
-    "Ccrit_mu": 0.60, "Ccrit_sd": 0.15, "Ccrit_L": 0.20, "Ccrit_U": 2.00,
-    "dx_mode": "beta", "dx_mu": 5.0, "dx_sd": 2.0, "dx_L": 0.0, "dx_U": 15.0,
-    "t_start_disp": 0.1, "t_end": 100.0, "t_points": 200, "N": 30000, "seed": 42,
-    "x_tick": 0.0, "show_pf": True,
-}.items():
-    st.session_state.setdefault(k, v)
-
-# ----------------------- UI (two columns) -----------------------
+# =============================
+# Main – two columns
+# =============================
 left, right = st.columns(2)
 
 with left:
-    st.subheader("Material & Model Parameters")
+    st.subheader("Ageing exponent α preset")
+    alpha_presets = {
+        "Please select": None,
+        "Portland Cement (PCC)": (0.30, 0.12, 0.0, 1.0),
+        "PCC w/ ≥ 20% Fly Ash": (0.60, 0.15, 0.0, 1.0),
+        "PCC w/ Blast Furnace Slag": (0.45, 0.20, 0.0, 1.0),
+        "Normally used – All types (atmospheric zone)": (0.65, 0.12, 0.0, 1.0),
+    }
+    alpha_choice = st.selectbox("Ageing exponent α preset", list(alpha_presets.keys()), index=0)
 
-    # α preset + fields (Ccrit moved to left too)
-    st.selectbox(
-        "α preset (auto-fill below)",
-        options=[PRESET_NONE] + list(ALPHA_PRESETS.keys()),
-        index=0,
-        key="alpha_preset",
-        on_change=apply_alpha_preset
-    )
-
-    alpha_mu = st.number_input("Ageing exponent α mean",
-                               value=st.session_state["alpha_mu"], key="alpha_mu")
-    alpha_sd = st.number_input("Ageing exponent α SD",
-                               value=st.session_state["alpha_sd"], key="alpha_sd")
-    alpha_L  = st.number_input("α lower bound L",
-                               value=st.session_state["alpha_L"], key="alpha_L")
-    alpha_U  = st.number_input("α upper bound U",
-                               value=st.session_state["alpha_U"], key="alpha_U")
-
-    Cs_mu    = st.number_input("Surface chloride mean (wt-%/binder)",
-                               value=st.session_state["Cs_mu"], key="Cs_mu")
-    Cs_sd    = st.number_input("Surface chloride SD",
-                               value=st.session_state["Cs_sd"], key="Cs_sd")
-
-    D0_mu    = st.number_input("DRCM0 mean (×1e-12 m²/s)",
-                               value=st.session_state["D0_mu"], key="D0_mu")
-    D0_sd    = st.number_input("DRCM0 SD",
-                               value=st.session_state["D0_sd"], key="D0_sd")
-
-    cover_mu = st.number_input("Cover mean (mm)",
-                               value=st.session_state["cover_mu"], key="cover_mu")
-    cover_sd = st.number_input("Cover SD (mm)",
-                               value=st.session_state["cover_sd"], key="cover_sd")
-
-    be_mu    = st.number_input("Temperature coeff mean",
-                               value=st.session_state["be_mu"], key="be_mu")
-    be_sd    = st.number_input("Temperature coeff SD",
-                               value=st.session_state["be_sd"], key="be_sd")
-
-    Treal_mu = st.number_input("Actual temperature mean (K)",
-                               value=st.session_state["Treal_mu"], key="Treal_mu")
-    Treal_sd = st.number_input("Actual temperature SD (K)",
-                               value=st.session_state["Treal_sd"], key="Treal_sd")
-
-    t0       = st.number_input("Reference age t0 (years)",
-                               value=st.session_state["t0"], format="%.5f", key="t0")
-    Tref     = st.number_input("Reference temperature Tref (K)",
-                               value=st.session_state["Tref"], key="Tref")
+    if alpha_presets[alpha_choice] is None:
+        alpha_mu = st.number_input("Ageing exponent α mean", value=0.65, step=0.01, format="%.6f")
+        alpha_sd = st.number_input("Ageing exponent α SD", value=0.12, step=0.01, format="%.6f")
+        alpha_L  = st.number_input("α lower bound L", value=0.0, step=0.01, format="%.6f")
+        alpha_U  = st.number_input("α upper bound U", value=1.0, step=0.01, format="%.6f")
+    else:
+        mu, sd, L, U = alpha_presets[alpha_choice]
+        alpha_mu = st.number_input("Ageing exponent α mean", value=float(mu), step=0.0, format="%.6f", disabled=True)
+        alpha_sd = st.number_input("Ageing exponent α SD", value=float(sd), step=0.0, format="%.6f", disabled=True)
+        alpha_L  = st.number_input("α lower bound L", value=float(L), step=0.0, format="%.6f", disabled=True)
+        alpha_U  = st.number_input("α upper bound U", value=float(U), step=0.0, format="%.6f", disabled=True)
 
     st.markdown("---")
-    st.markdown("**Critical chloride content Ccrit ~ Beta[L,U]**")
-    Ccrit_mu = st.number_input("Ccrit mean μ (wt-%/binder)",
-                               value=st.session_state["Ccrit_mu"], key="Ccrit_mu")
-    Ccrit_sd = st.number_input("Ccrit SD σ",
-                               value=st.session_state["Ccrit_sd"], key="Ccrit_sd")
-    Ccrit_L  = st.number_input("Ccrit lower bound L",
-                               value=st.session_state["Ccrit_L"], key="Ccrit_L")
-    Ccrit_U  = st.number_input("Ccrit upper bound U",
-                               value=st.session_state["Ccrit_U"], key="Ccrit_U")
+    st.subheader("Reference age t0 (yr)")
+    t0_options = {
+        "Please select": None,
+        "0.0767 – 28 days": 0.0767,
+        "0.1533 – 56 days": 0.1533,
+        "0.2464 – 90 days": 0.2464,
+    }
+    t0_choice = st.selectbox("Reference age t0", list(t0_options.keys()), index=0)
+    t0_value = t0_options[t0_choice]
+    t0_display = "" if t0_value is None else str(t0_value)
+    st.text_input("t0 value (yr)", value=t0_display, disabled=True)
+
+    st.markdown("---")
+    st.subheader("Ccrit (locked defaults)")
+    Ccrit_mu = st.number_input("Ccrit mean μ", value=0.60, step=0.01, format="%.6f", disabled=True)
+    Ccrit_sd = st.number_input("Ccrit SD σ", value=0.15, step=0.01, format="%.6f", disabled=True)
+    Ccrit_L  = st.number_input("Ccrit lower bound L", value=0.20, step=0.01, format="%.6f", disabled=True)
+    Ccrit_U  = st.number_input("Ccrit upper bound U", value=2.00, step=0.01, format="%.6f", disabled=True)
+
+    st.markdown("---")
+    st.subheader("Temperature coefficient b_e (locked)")
+    be_mu = st.number_input("Temperature coeff mean (b_e)", value=4800.0, step=0.0, format="%.6f", disabled=True)
+    be_sd = st.number_input("Temperature coeff SD (b_e)", value=700.0, step=0.0, format="%.6f", disabled=True)
+
+    st.markdown("---")
+    st.subheader("Editable Parameters")
+    C0 = st.number_input("Initial chloride C0 (wt-%/binder)", value=0.0, step=0.01, format="%.6f")
+    Cs_mu = st.number_input("Surface chloride mean (wt-%/binder)", value=3.0, step=0.01, format="%.6f")
+    Cs_sd = st.number_input("Surface chloride SD", value=0.5, step=0.01, format="%.6f")
+
+    D0_mu = st.number_input("DRCM0 mean (×1e-12 m²/s)", value=8.0, step=0.1, format="%.6f")
+    D0_sd = st.number_input("DRCM0 SD", value=1.5, step=0.1, format="%.6f")
+
+    cover_mu = st.number_input("Cover mean (mm)", value=50.0, step=0.5, format="%.6f")
+    cover_sd = st.number_input("Cover SD (mm)", value=8.0, step=0.5, format="%.6f")
+
+    Treal_mu = st.number_input("Actual temperature mean (K)", value=302.0, step=0.5, format="%.6f")
+    Treal_sd = st.number_input("Actual temperature SD (K)", value=2.0, step=0.5, format="%.6f")
+    Tref = st.number_input("Reference temperature Tref (K)", value=296.0, step=0.5, format="%.6f")
 
 with right:
-    st.subheader("Bounds, Time & Plot Settings")
+    st.subheader("Convection zone Δx")
+    dx_display_to_code = {
+        "Please select": None,
+        "Zero – submerged/spray (Δx = 0)": "zero",
+        "Beta – submerged (locked)": "beta_submerged",
+        "Beta – tidal (editable) – please enter": "beta_tidal",
+    }
+    dx_choice = st.selectbox("Δx mode", list(dx_display_to_code.keys()), index=0)
+    dx_code = dx_display_to_code[dx_choice]
 
-    st.markdown("**Convection zone Δx**")
-    dx_mode = st.selectbox("Δx mode", ["zero","beta"],
-                           index=0 if st.session_state["dx_mode"]=="zero" else 1, key="dx_mode")
-    if dx_mode == "beta":
-        dx_mu = st.number_input("Δx Beta mean μ (mm)",
-                                value=st.session_state["dx_mu"], key="dx_mu")
-        dx_sd = st.number_input("Δx Beta SD σ (mm)",
-                                value=st.session_state["dx_sd"], key="dx_sd")
-        dx_L  = st.number_input("Δx lower bound L (mm)",
-                                value=st.session_state["dx_L"], key="dx_L")
-        dx_U  = st.number_input("Δx upper bound U (mm)",
-                                value=st.session_state["dx_U"], key="dx_U")
-
-    st.markdown("---")
-    st.markdown("**Time window & Monte Carlo**")
-    t_start_disp = st.number_input("Plot start time (years)",
-                                   value=st.session_state["t_start_disp"], key="t_start_disp")
-    t_end        = st.number_input("Plot end time T (years)",
-                                   value=st.session_state["t_end"], key="t_end")
-    t_points     = st.number_input("Number of time points",
-                                   value=st.session_state["t_points"], step=10, key="t_points")
-    N            = st.number_input("Monte Carlo samples N",
-                                   value=st.session_state["N"], step=5000, key="N")
-    seed         = st.number_input("Random seed",
-                                   value=st.session_state["seed"], step=1, key="seed")
+    if dx_code in (None, "zero", "beta_submerged"):
+        dx_mu = st.number_input("Δx Beta mean μ (mm)", value=8.9, step=0.1, format="%.6f", disabled=True)
+        dx_sd = st.number_input("Δx Beta SD σ (mm)", value=5.6, step=0.1, format="%.6f", disabled=True)
+        dx_L  = st.number_input("Δx lower bound L (mm)", value=0.0, step=0.1, format="%.6f", disabled=True)
+        dx_U  = st.number_input("Δx upper bound U (mm)", value=50.0, step=0.1, format="%.6f", disabled=True)
+    else:
+        dx_mu = st.number_input("Δx Beta mean μ (mm)", value=8.9, step=0.1, format="%.6f")
+        dx_sd = st.number_input("Δx Beta SD σ (mm)", value=5.6, step=0.1, format="%.6f")
+        dx_L  = st.number_input("Δx lower bound L (mm)", value=0.0, step=0.1, format="%.6f")
+        dx_U  = st.number_input("Δx upper bound U (mm)", value=50.0, step=0.1, format="%.6f")
 
     st.markdown("---")
-    st.markdown("**Axes controls (leave blank for auto)**")
-    x_tick  = st.number_input("X tick step (years)", value=st.session_state["x_tick"],
-                              help="0 = auto", key="x_tick")
-    y1_min  = st.text_input("Y₁ = β min", "")
-    y1_max  = st.text_input("Y₁ = β max", "")
-    y1_tick = st.text_input("Y₁ = β tick step", "")
-    y2_min  = st.text_input("Y₂ = Pf min", "")
-    y2_max  = st.text_input("Y₂ = Pf max", "")
-    y2_tick = st.text_input("Y₂ = Pf tick step", "")
-    show_pf = st.checkbox("Show Pf (failure probability) curve",
-                          value=st.session_state["show_pf"], key="show_pf")
+    st.subheader("Run")
+    run_button = st.button("Run Simulation", type="primary")
 
-# ----------------------- Run -----------------------
-if st.button("Run Simulation", type="primary"):
+# =============================
+# Run + Plot
+# =============================
+if run_button:
     try:
+        if alpha_presets[alpha_choice] is None:
+            pass  # manual α already read
+        if t0_value is None:
+            st.error("Please select a reference age t0.")
+            st.stop()
+        if dx_code is None:
+            st.error("Please select a Δx mode.")
+            st.stop()
+        if t_end <= t_start_disp:
+            st.error("Plot end time must be greater than plot start time.")
+            st.stop()
+
         params = {
-            "Cs_mu": float(Cs_mu), "Cs_sd": float(Cs_sd),
+            "Cs_mu": float(Cs_mu),
+            "Cs_sd": float(Cs_sd),
 
-            "alpha_mu": float(alpha_mu), "alpha_sd": float(alpha_sd),
-            "alpha_L":  float(alpha_L),  "alpha_U":  float(alpha_U),
+            "alpha_mu": float(alpha_mu),
+            "alpha_sd": float(alpha_sd),
+            "alpha_L":  float(alpha_L),
+            "alpha_U":  float(alpha_U),
 
-            "D0_mu": float(D0_mu), "D0_sd": float(D0_sd),
+            "D0_mu": float(D0_mu),
+            "D0_sd": float(D0_sd),
 
-            "cover_mu": float(cover_mu), "cover_sd": float(cover_sd),
+            "cover_mu": float(cover_mu),
+            "cover_sd": float(cover_sd),
 
-            "Ccrit_mu": float(Ccrit_mu), "Ccrit_sd": float(Ccrit_sd),
-            "Ccrit_L":  float(Ccrit_L),  "Ccrit_U":  float(Ccrit_U),
+            "Ccrit_mu": float(Ccrit_mu),
+            "Ccrit_sd": float(Ccrit_sd),
+            "Ccrit_L":  float(Ccrit_L),
+            "Ccrit_U":  float(Ccrit_U),
 
-            "be_mu": float(be_mu), "be_sd": float(be_sd),
-            "Treal_mu": float(Treal_mu), "Treal_sd": float(Treal_sd),
+            "be_mu": float(be_mu),
+            "be_sd": float(be_sd),
+            "Treal_mu": float(Treal_mu),
+            "Treal_sd": float(Treal_sd),
 
-            "t0": float(t0), "Tref": float(Tref),
+            "t0": float(t0_value),
+            "Tref": float(Tref),
 
-            "C0": 0.05, "dx_mode": dx_mode
+            "C0": float(C0),
+
+            "dx_mode": dx_code,
         }
-        if dx_mode == "beta":
+        if dx_code in ("beta_submerged", "beta_tidal"):
             params.update({
-                "dx_mu": float(st.session_state["dx_mu"]),
-                "dx_sd": float(st.session_state["dx_sd"]),
-                "dx_L":  float(st.session_state["dx_L"]),
-                "dx_U":  float(st.session_state["dx_U"]),
+                "dx_mu": float(dx_mu),
+                "dx_sd": float(dx_sd),
+                "dx_L": float(dx_L),
+                "dx_U": float(dx_U),
             })
 
-        if float(t_end) <= float(t_start_disp):
-            st.error("Plot end time T must be greater than plot start time.")
-        else:
-            df_full = run_fib_chloride(params,
-                                       N=int(N), seed=int(seed),
-                                       t_start=0.0, t_end=float(t_end),
-                                       t_points=int(t_points))
-            # Windowed display (keep absolute x)
-            df_window = df_full[(df_full["t_years"] >= float(t_start_disp)) &
-                                (df_full["t_years"] <= float(t_end))].copy()
-            if df_window.empty:
-                st.error("Display window has no points; increase number of time points or adjust times.")
-            else:
-                axes_cfg = {
-                    "x_tick":  float(x_tick) if float(x_tick) > 0 else None,
-                    "y1_min":  _parse_or_none(y1_min),
-                    "y1_max":  _parse_or_none(y1_max),
-                    "y1_tick": _parse_or_none(y1_tick),
-                    "y2_min":  _parse_or_none(y2_min),
-                    "y2_max":  _parse_or_none(y2_max),
-                    "y2_tick": _parse_or_none(y2_tick),
-                }
-                fig = plot_beta(df_window, t_end=float(t_end),
-                                axes_cfg=axes_cfg, show_pf=bool(show_pf))
-                st.pyplot(fig, clear_figure=True)
-                st.download_button("Download CSV (windowed)",
-                                   df_window.to_csv(index=False).encode(),
-                                   "fib_output.csv", "text/csv")
+        df_full = run_fib_chloride(
+            params,
+            N=int(N),
+            seed=int(seed),
+            t_start=0.0,           # simulate from 0 for consistency
+            t_end=float(t_end),
+            t_points=int(t_points)
+        )
+        df_window = df_full[(df_full["t_years"] >= float(t_start_disp)) & (df_full["t_years"] <= float(t_end))].copy()
+        if df_window.empty:
+            st.error("Display window has no points; increase number of time points or adjust times.")
+            st.stop()
+
+        axes_cfg = {
+            "x_tick":  float(x_tick) if x_tick > 0 else None,
+            "y1_min":  float(y1_min),
+            "y1_max":  float(y1_max),
+            "y1_tick": float(y1_tick) if y1_tick > 0 else None,
+            "y2_min":  float(y2_min),
+            "y2_max":  float(y2_max),
+            "y2_tick": float(y2_tick) if y2_tick > 0 else None,
+        }
+
+        col_plot, col_dl = st.columns([2, 1])
+        with col_plot:
+            fig = plot_beta(df_window, t_end=float(t_end), axes_cfg=axes_cfg, show_pf=bool(show_pf))
+            st.pyplot(fig, clear_figure=True)
+
+        with col_dl:
+            st.subheader("Download")
+            csv = df_window.to_csv(index=False).encode("utf-8")
+            st.download_button("Download CSV (windowed)", data=csv, file_name="fib_output_window.csv", mime="text/csv")
+            csv_full = df_full.to_csv(index=False).encode("utf-8")
+            st.download_button("Download CSV (full)", data=csv_full, file_name="fib_output_full.csv", mime="text/csv")
+
+        with st.expander("Preview data (window)"):
+            st.dataframe(df_window.head(20))
+
     except Exception as e:
         st.error(f"Invalid input: {e}")
