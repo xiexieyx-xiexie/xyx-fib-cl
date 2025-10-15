@@ -179,20 +179,27 @@ def main():
     # Custom CSS to make inputs narrower
     st.markdown("""
         <style>
-        /* Make number inputs narrower - 1/5 width */
+        /* Make number inputs narrower - 1/10 width */
         div[data-testid="stNumberInput"] > div > div > input {
-            width: 20% !important;
-            min-width: 120px !important;
+            width: 10% !important;
+            min-width: 100px !important;
+            font-size: 16px !important;
+            padding: 8px !important;
         }
         /* Make text inputs narrower */
         div[data-testid="stTextInput"] > div > div > input {
-            width: 20% !important;
-            min-width: 120px !important;
+            width: 10% !important;
+            min-width: 100px !important;
+            font-size: 16px !important;
+            padding: 8px !important;
         }
         /* Make selectbox narrower */
         div[data-testid="stSelectbox"] > div > div {
-            width: 30% !important;
-            min-width: 180px !important;
+            width: 25% !important;
+            min-width: 200px !important;
+        }
+        div[data-testid="stSelectbox"] input {
+            font-size: 16px !important;
         }
         /* Adjust font sizes for better readability */
         .stMarkdown, .stText {
@@ -257,10 +264,14 @@ def main():
         
         if preset_data is None:
             # Please select - show empty locked fields
-            alpha_mu = st.number_input("α μ", value=0.0, disabled=True, key="alpha_mu")
-            alpha_sd = st.number_input("α σ", value=0.0, disabled=True, key="alpha_sd")
-            alpha_L = st.number_input("α lower bound L", value=0.0, disabled=True, key="alpha_L")
-            alpha_U = st.number_input("α upper bound U", value=0.0, disabled=True, key="alpha_U")
+            alpha_mu = 0.0
+            alpha_sd = 0.0
+            alpha_L = 0.0
+            alpha_U = 0.0
+            st.number_input("α μ", value=alpha_mu, disabled=True, key="alpha_mu")
+            st.number_input("α σ", value=alpha_sd, disabled=True, key="alpha_sd")
+            st.number_input("α lower bound L", value=alpha_L, disabled=True, key="alpha_L")
+            st.number_input("α upper bound U", value=alpha_U, disabled=True, key="alpha_U")
         elif is_custom:
             # Custom - editable fields
             alpha_mu = st.number_input("α μ", value=0.30, min_value=0.0, max_value=1.0, key="alpha_mu")
@@ -270,10 +281,10 @@ def main():
         else:
             # Preset selected - show values but locked
             alpha_mu, alpha_sd, alpha_L, alpha_U = preset_data
-            st.number_input("α μ", value=alpha_mu, disabled=True, key="alpha_mu")
-            st.number_input("α σ", value=alpha_sd, disabled=True, key="alpha_sd")
-            st.number_input("α lower bound L", value=alpha_L, disabled=True, key="alpha_L")
-            st.number_input("α upper bound U", value=alpha_U, disabled=True, key="alpha_U")
+            st.number_input("α μ", value=float(alpha_mu), disabled=True, key="alpha_mu")
+            st.number_input("α σ", value=float(alpha_sd), disabled=True, key="alpha_sd")
+            st.number_input("α lower bound L", value=float(alpha_L), disabled=True, key="alpha_L")
+            st.number_input("α upper bound U", value=float(alpha_U), disabled=True, key="alpha_U")
         
         # Reference age
         t0_header = st.columns([0.9, 0.1])
@@ -313,7 +324,13 @@ def main():
         Cs_sd = st.number_input("Surface chloride σ", value=1.0, min_value=0.0)
         
         D0_mu = st.number_input("DRCM0 μ (×1e-12 m²/s)", value=10.0, min_value=0.0, key="d0_mu")
-        D0_sd = D0_mu * 0.2
+        # Use session state to track D0_sd calculation
+        if 'd0_sd_calc' not in st.session_state:
+            st.session_state.d0_sd_calc = D0_mu * 0.2
+        # Update when D0_mu changes
+        if abs(st.session_state.d0_sd_calc - D0_mu * 0.2) > 0.001:
+            st.session_state.d0_sd_calc = D0_mu * 0.2
+        D0_sd = st.session_state.d0_sd_calc
         st.number_input("DRCM0 σ (×1e-12 m²/s)", value=D0_sd, disabled=True, key="d0_sd",
                        help="Auto-calculated as 0.2 × μ")
         
@@ -350,24 +367,24 @@ def main():
         # Determine if fields should be locked or editable
         if dx_mode is None:
             # Please select - show empty locked fields
-            st.number_input("Δx Beta mean μ (mm)", value=0.0, disabled=True, key="dx_mu")
-            st.number_input("Δx Beta SD σ (mm)", value=0.0, disabled=True, key="dx_sd")
-            st.number_input("Δx lower bound L (mm)", value=0.0, disabled=True, key="dx_L")
-            st.number_input("Δx upper bound U (mm)", value=0.0, disabled=True, key="dx_U")
-            dx_mu, dx_sd, dx_L, dx_U = 0, 0, 0, 0
-        elif dx_mode == "zero":
-            dx_mu, dx_sd, dx_L, dx_U = 0, 0, 0, 0
-            st.number_input("Δx Beta mean μ (mm)", value=0.0, disabled=True, key="dx_mu")
-            st.number_input("Δx Beta SD σ (mm)", value=0.0, disabled=True, key="dx_sd")
-            st.number_input("Δx lower bound L (mm)", value=0.0, disabled=True, key="dx_L")
-            st.number_input("Δx upper bound U (mm)", value=0.0, disabled=True, key="dx_U")
-            st.info("Δx = 0 for submerged/spray conditions")
-        elif dx_mode == "beta_submerged":
-            dx_mu, dx_sd, dx_L, dx_U = 8.9, 5.6, 0.0, 50.0
+            dx_mu, dx_sd, dx_L, dx_U = 0.0, 0.0, 0.0, 0.0
             st.number_input("Δx Beta mean μ (mm)", value=dx_mu, disabled=True, key="dx_mu")
             st.number_input("Δx Beta SD σ (mm)", value=dx_sd, disabled=True, key="dx_sd")
             st.number_input("Δx lower bound L (mm)", value=dx_L, disabled=True, key="dx_L")
             st.number_input("Δx upper bound U (mm)", value=dx_U, disabled=True, key="dx_U")
+        elif dx_mode == "zero":
+            dx_mu, dx_sd, dx_L, dx_U = 0.0, 0.0, 0.0, 0.0
+            st.number_input("Δx Beta mean μ (mm)", value=dx_mu, disabled=True, key="dx_mu")
+            st.number_input("Δx Beta SD σ (mm)", value=dx_sd, disabled=True, key="dx_sd")
+            st.number_input("Δx lower bound L (mm)", value=dx_L, disabled=True, key="dx_L")
+            st.number_input("Δx upper bound U (mm)", value=dx_U, disabled=True, key="dx_U")
+            st.info("Δx = 0 for submerged/spray conditions")
+        elif dx_mode == "beta_submerged":
+            dx_mu, dx_sd, dx_L, dx_U = 8.9, 5.6, 0.0, 50.0
+            st.number_input("Δx Beta mean μ (mm)", value=float(dx_mu), disabled=True, key="dx_mu")
+            st.number_input("Δx Beta SD σ (mm)", value=float(dx_sd), disabled=True, key="dx_sd")
+            st.number_input("Δx lower bound L (mm)", value=float(dx_L), disabled=True, key="dx_L")
+            st.number_input("Δx upper bound U (mm)", value=float(dx_U), disabled=True, key="dx_U")
         else:  # beta_tidal - editable
             dx_mu = st.number_input("Δx Beta mean μ (mm)", value=10.0, min_value=0.0, key="dx_mu")
             dx_sd = st.number_input("Δx Beta SD σ (mm)", value=5.0, min_value=0.0, key="dx_sd")
@@ -386,49 +403,58 @@ def main():
                 st.write("You can input values in either Celsius (°C) or Kelvin (K).")
                 st.write("The conversion is automatic: K = °C + 273")
         
+        # Use session state to manage temperature values
+        if 'treal_c_val' not in st.session_state:
+            st.session_state.treal_c_val = 20.0
+        if 'treal_sd_val' not in st.session_state:
+            st.session_state.treal_sd_val = 5.0
+        if 'tref_c_val' not in st.session_state:
+            st.session_state.tref_c_val = 23.0
+        
         st.write("**Actual Temperature (mean)**")
         temp_mu_cols = st.columns(2)
         with temp_mu_cols[0]:
-            Treal_C = st.number_input("°C", value=20.0, key="treal_c", 
+            Treal_C = st.number_input("°C", value=st.session_state.treal_c_val, key="treal_c_input", 
                                       help="Actual temperature in Celsius")
-            Treal_mu = Treal_C + 273
+            st.session_state.treal_c_val = Treal_C
         with temp_mu_cols[1]:
-            Treal_K_display = st.number_input("K", value=Treal_C + 273, key="treal_k_display",
-                                              help="Actual temperature in Kelvin")
-            # If user edits K field, update C
-            if abs(Treal_K_display - (Treal_C + 273)) > 0.1:
-                Treal_C = Treal_K_display - 273
-                Treal_mu = Treal_K_display
-            else:
-                Treal_mu = Treal_C + 273
+            Treal_K = st.number_input("K", value=st.session_state.treal_c_val + 273, key="treal_k_input",
+                                      help="Actual temperature in Kelvin")
+            # If K changed, update C
+            if abs(Treal_K - (st.session_state.treal_c_val + 273)) > 0.1:
+                st.session_state.treal_c_val = Treal_K - 273
+                st.rerun()
+        Treal_mu = st.session_state.treal_c_val + 273
         
         st.write("**Actual Temperature (std dev)**")
         temp_sd_cols = st.columns(2)
         with temp_sd_cols[0]:
-            Treal_sd_C = st.number_input("σ (°C)", value=5.0, min_value=0.0, key="treal_sd_c",
-                                         help="Temperature standard deviation")
-            Treal_sd = Treal_sd_C
+            Treal_sd_C = st.number_input("σ (°C)", value=st.session_state.treal_sd_val, min_value=0.0, 
+                                         key="treal_sd_c_input", help="Temperature standard deviation")
+            st.session_state.treal_sd_val = Treal_sd_C
         with temp_sd_cols[1]:
-            Treal_sd_K_display = st.number_input("σ (K)", value=Treal_sd_C, min_value=0.0, key="treal_sd_k_display",
-                                                 help="Same as °C for std dev")
-            if abs(Treal_sd_K_display - Treal_sd_C) > 0.01:
-                Treal_sd = Treal_sd_K_display
-            else:
-                Treal_sd = Treal_sd_C
+            Treal_sd_K = st.number_input("σ (K)", value=st.session_state.treal_sd_val, min_value=0.0, 
+                                         key="treal_sd_k_input", help="Same value as °C for std dev")
+            # If K changed, update C
+            if abs(Treal_sd_K - st.session_state.treal_sd_val) > 0.01:
+                st.session_state.treal_sd_val = Treal_sd_K
+                st.rerun()
+        Treal_sd = st.session_state.treal_sd_val
         
         st.write("**Reference Temperature**")
         temp_ref_cols = st.columns(2)
         with temp_ref_cols[0]:
-            Tref_C = st.number_input("Tref (°C)", value=23.0, key="tref_c",
+            Tref_C = st.number_input("Tref (°C)", value=st.session_state.tref_c_val, key="tref_c_input",
                                      help="Reference temperature in Celsius")
-            Tref = Tref_C + 273
+            st.session_state.tref_c_val = Tref_C
         with temp_ref_cols[1]:
-            Tref_K_display = st.number_input("Tref (K)", value=Tref_C + 273, key="tref_k_display",
-                                            help="Reference temperature in Kelvin")
-            if abs(Tref_K_display - (Tref_C + 273)) > 0.1:
-                Tref = Tref_K_display
-            else:
-                Tref = Tref_C + 273
+            Tref_K = st.number_input("Tref (K)", value=st.session_state.tref_c_val + 273, key="tref_k_input",
+                                     help="Reference temperature in Kelvin")
+            # If K changed, update C
+            if abs(Tref_K - (st.session_state.tref_c_val + 273)) > 0.1:
+                st.session_state.tref_c_val = Tref_K - 273
+                st.rerun()
+        Tref = st.session_state.tref_c_val + 273
         
         # Time window & Monte Carlo
         time_header = st.columns([0.9, 0.1])
@@ -447,11 +473,15 @@ def main():
                 st.write("- N samples: Number of random realizations (100,000 recommended)")
                 st.write("- Random seed: For reproducible results")
         
-        t_start = st.number_input("Plot start time (yr)", value=0.9, min_value=0.0)
-        t_end = st.number_input("Plot end time (Target yr)", value=50.0, min_value=0.1)
-        t_points = st.number_input("Number of time points", value=200, min_value=10)
-        N = st.number_input("Monte Carlo samples N", value=100000, min_value=1000)
-        seed = st.number_input("Random seed", value=42, min_value=0)
+        # Two columns for time window & Monte Carlo
+        time_col1, time_col2 = st.columns(2)
+        with time_col1:
+            t_start = st.number_input("Plot start time (yr)", value=0.9, min_value=0.0, key="t_start")
+            t_end = st.number_input("Plot end time (Target yr)", value=50.0, min_value=0.1, key="t_end")
+            t_points = st.number_input("Number of time points", value=200, min_value=10, key="t_points")
+        with time_col2:
+            N = st.number_input("Monte Carlo samples N", value=100000, min_value=1000, key="n_samples")
+            seed = st.number_input("Random seed", value=42, min_value=0, key="seed")
         
         # Target reliability
         target_header = st.columns([0.9, 0.1])
