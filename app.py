@@ -14,25 +14,54 @@ st.title("fib Chloride induced corrosion Full probabilistic Model")
 st.caption("")
 
 # =============================
-# Helper: title with popovers
+# Helper: title with "?" help (and optional popover items)
 # =============================
-def title_with_popovers(title: str, items: list[dict]):
+def title_with_help(
+    title: str,
+    help_md: str | None = None,
+    items: list[dict] | None = None,
+    level: str = "subheader",
+):
     """
-    Render a section title with small popover buttons to show images inline.
+    渲染一个标题，并在右侧放一个“?”图标按钮（popover）显示说明文字。
+    也可同时在右侧追加多个小按钮（items）展示图片或更多内容。
 
-    items: list of {"label": str, "image": str, "caption": Optional[str]}
-           - 'image' 
+    items: 可选; 每项为 {"label": str, "image": str, "caption": Optional[str]}
     """
-    n = max(1, len(items))
-    cols = st.columns([0.78] + [0.22 / n] * n)
+    items = items or []
+    n = len(items)
+
+    # 左侧放标题；右侧放一个“?”以及若干个图片/资料按钮
+    # 宽度比例：标题 0.74；? 0.08；其余平均分配在 0.18
+    if n > 0:
+        cols = st.columns([0.74, 0.08] + [0.18 / n] * n, vertical_alignment="center")
+    else:
+        cols = st.columns([0.90, 0.10], vertical_alignment="center")
+
+    # 标题
     with cols[0]:
-        st.subheader(title)
-    for i, item in enumerate(items, start=1):
-        label = item.get("label", "Diagram")
+        if level == "title":
+            st.title(title)
+        elif level == "header":
+            st.header(title)
+        else:
+            st.subheader(title)
+
+    # 说明“？”按钮
+    with cols[1]:
+        with st.popover("❓", use_container_width=True):
+            if help_md:
+                st.markdown(help_md)
+            else:
+                st.info("No help text provided.")
+
+    # 追加资源按钮（可选）
+    for i, item in enumerate(items, start=2 if n > 0 else 2):
+        label = item.get("label", "Reference")
         src = item.get("image", "")
         caption = item.get("caption", None)
         with cols[i]:
-            with st.popover(f"🔗 {label}"):
+            with st.popover(f"🔗 {label}", use_container_width=True):
                 if src:
                     st.image(src, caption=caption, use_container_width=True)
                 else:
@@ -172,12 +201,15 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True):
 left, right = st.columns(2)
 
 with left:
-    # ---- Ageing exponent section with popovers ----
-    title_with_popovers(
+    # ---- Ageing exponent section with "?" and (optional) references ----
+    title_with_help(
         "Ageing exponent α preset",
-        items=[
-            {"label": "Reference", "image": "assets/alpha_diagram.png", "caption": "How to choose α"},
-    ],
+        help_md=(
+            "**α** 为随龄期扩散系数衰减指数，值越大代表老化效应越强。"
+            "通常取 0–1；典型范围可参考 PCC、FA、GGBFS 等体系文献与试验。"
+            "选择预设可直接锁定数值；选择自定义可自由输入 μ/σ/上下限。"
+        ),
+        items=[{"label": "Reference", "image": "assets/alpha_diagram.png", "caption": "How to choose α"}],
     )
 
     alpha_presets = {
@@ -186,14 +218,15 @@ with left:
         "PCC w/ ≥ 20% Fly Ash": (0.60, 0.15, 0.0, 1.0),
         "PCC w/ Blast Furnace Slag": (0.45, 0.20, 0.0, 1.0),
         "Normally used – All types (atmospheric zone)": (0.65, 0.12, 0.0, 1.0),
+        # 你也可以在这里继续追加预设
     }
-    alpha_choice = st.selectbox("Ageing exponent α preset", list(alpha_presets.keys()), index=0)
+    alpha_choice = st.selectbox("Ageing exponent α preset", list(alpha_presets.keys()), index=0, help="选择预设或保持手动输入。")
 
     if alpha_presets[alpha_choice] is None:
-        alpha_mu = st.number_input("Ageing exponent α mean", value=0.65, step=0.01)
-        alpha_sd = st.number_input("Ageing exponent α SD", value=0.12, step=0.01)
-        alpha_L  = st.number_input("α lower bound L", value=0.0, step=0.01)
-        alpha_U  = st.number_input("α upper bound U", value=1.0, step=0.01)
+        alpha_mu = st.number_input("Ageing exponent α mean", value=0.65, step=0.01, help="α 的均值（0–1）。")
+        alpha_sd = st.number_input("Ageing exponent α SD", value=0.12, step=0.01, help="α 的标准差。")
+        alpha_L  = st.number_input("α lower bound L", value=0.0, step=0.01, help="β 分布下界（通常为 0）。")
+        alpha_U  = st.number_input("α upper bound U", value=1.0, step=0.01, help="β 分布上界（通常为 1）。")
     else:
         mu, sd, L, U = alpha_presets[alpha_choice]
         alpha_mu = st.number_input("Ageing exponent α mean", value=float(mu), disabled=True)
@@ -201,8 +234,11 @@ with left:
         alpha_L  = st.number_input("α lower bound L", value=float(L), disabled=True)
         alpha_U  = st.number_input("α upper bound U", value=float(U), disabled=True)
 
-    # t0
-    st.markdown("**Reference age t0 (yr)**")
+    # ---- t0 ----
+    title_with_help(
+        "Reference age t0 (yr)",
+        help_md="NT Build 443 等加速试验的等效龄期；示例：28/56/90 天 ≈ 0.0767/0.1533/0.2464 年。",
+    )
     t0_options = {
         "Please select": None,
         "0.0767 – 28 days": 0.0767,
@@ -213,18 +249,33 @@ with left:
     t0_value = t0_options[t0_choice]
     st.text_input("", value=("" if t0_value is None else str(t0_value)), disabled=True, label_visibility="collapsed")
 
-    # Ccrit (locked)
+    # ---- Ccrit（锁定） ----
+    title_with_help(
+        "Critical chloride content Ccrit (locked)",
+        help_md="钢筋钝化破坏的临界氯含量（以胶凝材料质量百分比计）。本版本固定供比对用。",
+    )
     Ccrit_mu = st.number_input("Ccrit mean μ", value=0.60, disabled=True)
     Ccrit_sd = st.number_input("Ccrit SD σ", value=0.15, disabled=True)
     Ccrit_L  = st.number_input("Ccrit lower bound L", value=0.20, disabled=True)
     Ccrit_U  = st.number_input("Ccrit upper bound U", value=2.00, disabled=True)
 
-    # be (locked)
+    # ---- be（锁定） ----
+    title_with_help(
+        "Temperature coefficient b_e (locked)",
+        help_md="温度修正系数：exp(b_e·(1/Tref − 1/Treal))；本版本固定供比对用。",
+    )
     be_mu = st.number_input("Temperature coeff mean (b_e)", value=4800.0, disabled=True)
     be_sd = st.number_input("Temperature coeff SD (b_e)", value=700.0, disabled=True)
 
     st.divider()
-    st.markdown("**Editable Parameters**")
+    title_with_help(
+        "Editable Parameters",
+        help_md=(
+            "常规可编辑参数：表面氯、扩散系数、保护层、温度等。\n\n"
+            "- DRCM0 为 NT Build 443 迁移系数的等效扩散量级（×1e-12 m²/s）。\n"
+            "- 温度以 K 计；Tref 常取 296 K（23°C）。"
+        ),
+    )
     C0    = st.number_input("Initial chloride C0 (wt-%/binder)", value=0.0, step=0.01)
     Cs_mu = st.number_input("Surface chloride mean (wt-%/binder)", value=3.0, step=0.01)
     Cs_sd = st.number_input("Surface chloride SD", value=0.5, step=0.01)
@@ -240,12 +291,16 @@ with left:
     Tref     = st.number_input("Reference temperature Tref (K)", value=296.0, step=0.5)
 
 with right:
-    # ---- Δx section with popovers ----
-    title_with_popovers(
+    # ---- Δx section ----
+    title_with_help(
         "Convection zone Δx",
-        items=[
-            {"label": "Reference",  "image": "assets/dx_modes.png",  "caption": "Δx option"},
-        ],
+        help_md=(
+            "混凝土表面对流层/对流区厚度：\n\n"
+            "- **Zero**：淹没/喷淋环境，Δx≈0。\n"
+            "- **Beta–submerged**：给定 β[L,U] 分布并锁定显示。\n"
+            "- **Beta–tidal**：潮汐带，允许手动编辑 μ/σ/L/U。"
+        ),
+        items=[{"label": "Reference", "image": "assets/dx_modes.png", "caption": "Δx option"}],
     )
 
     dx_display_to_code = {
@@ -254,17 +309,25 @@ with right:
         "Beta – submerged (locked)": "beta_submerged",
         "Beta – tidal (editable) – please enter": "beta_tidal",
     }
-    dx_choice = st.selectbox("Δx mode", list(dx_display_to_code.keys()), index=0)
+    dx_choice = st.selectbox("Δx mode", list(dx_display_to_code.keys()), index=0, help="选择对流层建模方式。")
     dx_code = dx_display_to_code[dx_choice]
 
     editable_dx = (dx_code == "beta_tidal")
-    dx_mu = st.number_input("Δx Beta mean μ (mm)", value=8.9, step=0.1, disabled=not editable_dx)
-    dx_sd = st.number_input("Δx Beta SD σ (mm)", value=5.6, step=0.1, disabled=not editable_dx)
-    dx_L  = st.number_input("Δx lower bound L (mm)", value=0.0, step=0.1, disabled=not editable_dx)
-    dx_U  = st.number_input("Δx upper bound U (mm)", value=50.0, step=0.1, disabled=not editable_dx)
+    dx_mu = st.number_input("Δx Beta mean μ (mm)", value=8.9, step=0.1, disabled=not editable_dx, help="Δx 的均值（mm）。")
+    dx_sd = st.number_input("Δx Beta SD σ (mm)", value=5.6, step=0.1, disabled=not editable_dx, help="Δx 的标准差（mm）。")
+    dx_L  = st.number_input("Δx lower bound L (mm)", value=0.0, step=0.1, disabled=not editable_dx, help="β 分布下界（mm）。")
+    dx_U  = st.number_input("Δx upper bound U (mm)", value=50.0, step=0.1, disabled=not editable_dx, help="β 分布上界（mm）。")
 
     st.divider()
-    st.markdown("**Time window & Monte Carlo**")
+    title_with_help(
+        "Time window & Monte Carlo",
+        help_md=(
+            "- **Plot start/end**：图像显示的时间范围；计算从 0 到目标年限，显示窗口截取。\n"
+            "- **t_points**：时间剖分点数。\n"
+            "- **N**：蒙特卡洛样本数；越大越平滑但更耗时。\n"
+            "- **seed**：随机种子以复现实验结果。"
+        ),
+    )
     t_start_disp = st.number_input("Plot start time (yr)", min_value=0.0, value=0.9, step=0.1)
     t_end        = st.number_input("Plot end time (Target yr)", min_value=t_start_disp + 1e-6, value=50.0, step=1.0)
     t_points     = st.number_input("Number of time points", min_value=10, value=200, step=10)
@@ -272,7 +335,13 @@ with right:
     seed         = st.number_input("Random seed", min_value=0, value=42, step=1)
 
     st.divider()
-    st.markdown("**Axes controls (leave blank = auto) — RUN FIRST — Adjust only if graph not good**")
+    title_with_help(
+        "Axes controls (leave blank = auto) — RUN FIRST — Adjust only if graph not good",
+        help_md=(
+            "先运行看默认坐标是否合适；如需微调，再设置刻度/范围。"
+            "Pf 轴用于对数/线性比对时的可视化控制（此处为线性）。"
+        ),
+    )
     x_tick  = st.number_input("X tick step (years)", value=10.0, step=1.0)
     y1_min  = st.number_input("Y₁ = β min", value=-2.0, step=0.5)
     y1_max  = st.number_input("Y₁ = β max", value=5.0, step=0.5)
@@ -281,7 +350,7 @@ with right:
     y2_max  = st.number_input("Y₂ = Pf max", value=1.0, step=0.01)
     y2_tick = st.number_input("Y₂ = Pf tick step", value=0.1, step=0.01)
 
-    show_pf = st.checkbox("Show Pf (failure probability) curve", value=True)
+    show_pf = st.checkbox("Show Pf (failure probability) curve", value=True, help="勾选显示 Pf(t) 右轴曲线。")
 
 # ===== Run button =====
 c1, c2, c3 = st.columns([1,2,1])
