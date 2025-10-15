@@ -186,19 +186,32 @@ def main():
         st.header("📋 Model Parameters")
         
         # Locked parameters (Ccrit)
-        with st.expander("🔒 Critical Chloride Content (Ccrit) - Locked", expanded=False):
-            Ccrit_mu = st.number_input("Ccrit μ (wt-%/binder)", value=0.60, disabled=True)
-            Ccrit_sd = st.number_input("Ccrit σ", value=0.15, disabled=True)
-            Ccrit_L = st.number_input("Ccrit lower bound L", value=0.20, disabled=True)
-            Ccrit_U = st.number_input("Ccrit upper bound U", value=2.00, disabled=True)
+        st.subheader("🔒 Critical Chloride Content (Ccrit) - Locked")
+        Ccrit_mu = st.number_input("Ccrit μ (wt-%/binder)", value=0.60, disabled=True, key="ccrit_mu")
+        Ccrit_sd = st.number_input("Ccrit σ", value=0.15, disabled=True, key="ccrit_sd")
+        Ccrit_L = st.number_input("Ccrit lower bound L", value=0.20, disabled=True, key="ccrit_l")
+        Ccrit_U = st.number_input("Ccrit upper bound U", value=2.00, disabled=True, key="ccrit_u")
         
         # Temperature coefficient (locked)
-        with st.expander("🔒 Temperature Coefficient (be) - Locked", expanded=False):
-            be_mu = st.number_input("Temperature coeff (b_e) μ", value=4800.0, disabled=True)
-            be_sd = st.number_input("Temperature coeff (b_e) σ", value=700.0, disabled=True)
+        st.subheader("🔒 Temperature Coefficient (be) - Locked")
+        be_mu = st.number_input("Temperature coeff (b_e) μ", value=4800.0, disabled=True, key="be_mu")
+        be_sd = st.number_input("Temperature coeff (b_e) σ", value=700.0, disabled=True, key="be_sd")
         
         # Alpha preset
-        st.subheader("⚙️ Ageing Exponent (α)")
+        alpha_header = st.columns([0.9, 0.1])
+        with alpha_header[0]:
+            st.subheader("⚙️ Ageing Exponent (α)")
+        with alpha_header[1]:
+            st.markdown("")  # spacing
+            with st.popover("❓"):
+                st.markdown("### Ageing Exponent (α) Information")
+                st.write("The ageing exponent α describes how the diffusion coefficient decreases over time.")
+                st.write("**Typical values:**")
+                st.write("- Portland Cement: 0.30")
+                st.write("- With Fly Ash: 0.60")
+                st.write("- With Slag: 0.45")
+                st.image("https://via.placeholder.com/300x200?text=Add+Your+Image+Here", caption="Example diagram")
+        
         alpha_presets = {
             "Portland Cement (PCC) 0.30 0.12": (0.30, 0.12, 0.0, 1.0),
             "PCC w/ ≥ 20% Fly Ash 0.60 0.15": (0.60, 0.15, 0.0, 1.0),
@@ -220,7 +233,19 @@ def main():
             alpha_U = st.number_input("α upper bound U", value=1.0, min_value=0.0)
         
         # Reference age
-        st.subheader("📅 Reference Age (t0)")
+        t0_header = st.columns([0.9, 0.1])
+        with t0_header[0]:
+            st.subheader("📅 Reference Age (t0)")
+        with t0_header[1]:
+            st.markdown("")  # spacing
+            with st.popover("❓"):
+                st.markdown("### Reference Age (t0) Information")
+                st.write("The reference age represents the concrete age when DRCM test is performed.")
+                st.write("**Common values:**")
+                st.write("- 28 days: Standard testing age")
+                st.write("- 56 days: Extended curing")
+                st.write("- 90 days: Long-term assessment")
+        
         t0_options = {
             "0.0767 – 28 days": 0.0767,
             "0.1533 – 56 days": 0.1533,
@@ -244,23 +269,95 @@ def main():
         cover_mu = st.number_input("Cover μ (mm)", value=50.0, min_value=0.0)
         cover_sd = st.number_input("Cover σ (mm)", value=10.0, min_value=0.0)
         
-        Treal_C = st.number_input("Actual temperature μ (°C)", value=20.0)
-        Treal_mu = Treal_C + 273
-        st.text(f"Actual temperature = {Treal_mu:.2f} K")
+        # Temperature section with C and K in columns
+        temp_header = st.columns([0.9, 0.1])
+        with temp_header[0]:
+            st.subheader("🌡️ Temperature Parameters")
+        with temp_header[1]:
+            st.markdown("")  # spacing
+            with st.popover("❓"):
+                st.markdown("### Temperature Information")
+                st.write("Temperature affects chloride diffusion through the Arrhenius equation.")
+                st.write("You can input values in either Celsius (°C) or Kelvin (K).")
+                st.write("The conversion is automatic: K = °C + 273")
         
-        Treal_sd_C = st.number_input("Actual temperature σ (°C)", value=5.0, min_value=0.0)
-        Treal_sd = Treal_sd_C
-        st.text(f"Actual temperature σ = {Treal_sd:.2f} K")
+        # Initialize session state for temperature sync
+        if 'temp_sync' not in st.session_state:
+            st.session_state.temp_sync = True
         
-        Tref_C = st.number_input("Reference temperature (°C)", value=23.0)
-        Tref = Tref_C + 273
-        st.text(f"Reference temperature = {Tref:.2f} K")
+        st.write("**Actual Temperature (mean)**")
+        temp_mu_cols = st.columns(2)
+        with temp_mu_cols[0]:
+            Treal_C = st.number_input("°C", value=20.0, key="treal_c", 
+                                      help="Actual temperature in Celsius")
+        with temp_mu_cols[1]:
+            Treal_mu = st.number_input("K", value=293.0, key="treal_k",
+                                       help="Actual temperature in Kelvin")
+        
+        # Sync logic
+        if abs(Treal_mu - (Treal_C + 273)) > 0.1:
+            # User changed one, update the other based on last changed
+            if st.session_state.get('last_temp_mu_change') == 'C':
+                st.session_state.treal_k = Treal_C + 273
+                st.rerun()
+            else:
+                st.session_state.treal_c = Treal_mu - 273
+                st.rerun()
+        
+        st.write("**Actual Temperature (std dev)**")
+        temp_sd_cols = st.columns(2)
+        with temp_sd_cols[0]:
+            Treal_sd_C = st.number_input("σ (°C)", value=5.0, min_value=0.0, key="treal_sd_c",
+                                         help="Temperature standard deviation")
+        with temp_sd_cols[1]:
+            Treal_sd = st.number_input("σ (K)", value=5.0, min_value=0.0, key="treal_sd_k",
+                                       help="Same as °C for std dev")
+        
+        # Sync std dev
+        if abs(Treal_sd - Treal_sd_C) > 0.01:
+            if st.session_state.get('last_temp_sd_change') == 'C':
+                st.session_state.treal_sd_k = Treal_sd_C
+                st.rerun()
+            else:
+                st.session_state.treal_sd_c = Treal_sd
+                st.rerun()
+        
+        st.write("**Reference Temperature**")
+        temp_ref_cols = st.columns(2)
+        with temp_ref_cols[0]:
+            Tref_C = st.number_input("Tref (°C)", value=23.0, key="tref_c",
+                                     help="Reference temperature in Celsius")
+        with temp_ref_cols[1]:
+            Tref = st.number_input("Tref (K)", value=296.0, key="tref_k",
+                                   help="Reference temperature in Kelvin")
+        
+        # Sync reference temp
+        if abs(Tref - (Tref_C + 273)) > 0.1:
+            if st.session_state.get('last_temp_ref_change') == 'C':
+                st.session_state.tref_k = Tref_C + 273
+                st.rerun()
+            else:
+                st.session_state.tref_c = Tref - 273
+                st.rerun()
     
     with col2:
         st.header("⚙️ Simulation Settings")
         
         # Convection zone
-        st.subheader("🌊 Convection Zone (Δx)")
+        dx_header = st.columns([0.9, 0.1])
+        with dx_header[0]:
+            st.subheader("🌊 Convection Zone (Δx)")
+        with dx_header[1]:
+            st.markdown("")  # spacing
+            with st.popover("❓"):
+                st.markdown("### Convection Zone (Δx) Information")
+                st.write("The convection zone represents the depth where chlorides are removed by water flow.")
+                st.write("**Modes:**")
+                st.write("- **Zero**: Fully submerged or spray zone (Δx = 0)")
+                st.write("- **Beta-Submerged**: Partially submerged with locked parameters")
+                st.write("- **Beta-Tidal**: Tidal zone with customizable parameters")
+                st.image("https://via.placeholder.com/300x200?text=Convection+Zone+Diagram", caption="Convection zone illustration")
+        
         dx_options = {
             "Zero – submerged/spray (Δx = 0)": "zero",
             "Beta – submerged (locked)": "beta_submerged",
@@ -282,7 +379,22 @@ def main():
             dx_U = st.number_input("Δx upper bound U (mm)", value=50.0, min_value=0.0)
         
         # Time window & Monte Carlo
-        st.subheader("⏱️ Time Window & Monte Carlo")
+        time_header = st.columns([0.9, 0.1])
+        with time_header[0]:
+            st.subheader("⏱️ Time Window & Monte Carlo")
+        with time_header[1]:
+            st.markdown("")  # spacing
+            with st.popover("❓"):
+                st.markdown("### Time Window & Monte Carlo Information")
+                st.write("**Time Window:**")
+                st.write("- Start time: When to begin plotting (usually near t0)")
+                st.write("- End time: Design life or target service life")
+                st.write("- Time points: More points = smoother curve but slower computation")
+                st.write("")
+                st.write("**Monte Carlo Simulation:**")
+                st.write("- N samples: Number of random realizations (100,000 recommended)")
+                st.write("- Random seed: For reproducible results")
+        
         t_start = st.number_input("Plot start time (yr)", value=0.9, min_value=0.0)
         t_end = st.number_input("Plot end time (Target yr)", value=50.0, min_value=0.1)
         t_points = st.number_input("Number of time points", value=200, min_value=10)
@@ -290,13 +402,41 @@ def main():
         seed = st.number_input("Random seed", value=42, min_value=0)
         
         # Target reliability
-        st.subheader("🎯 Target Reliability Index")
+        target_header = st.columns([0.9, 0.1])
+        with target_header[0]:
+            st.subheader("🎯 Target Reliability Index")
+        with target_header[1]:
+            st.markdown("")  # spacing
+            with st.popover("❓"):
+                st.markdown("### Target Reliability Index (β) Information")
+                st.write("The reliability index β represents the structural safety level.")
+                st.write("**Typical values (ISO 2394, Eurocode):**")
+                st.write("- β = 1.5: Low consequence (50 years)")
+                st.write("- β = 2.3: Medium consequence")
+                st.write("- β = 3.8: High consequence")
+                st.write("")
+                st.write("The plot will show when your structure reaches this target level.")
+        
         beta_target = st.number_input("Target β value", value=1.5, min_value=0.0)
         show_beta_target = st.checkbox("Show target β on plot", value=True)
         
         # Axes controls
-        st.subheader("📊 Plot Axes Controls")
-        st.info("Leave blank for auto-scaling. Run simulation first, then adjust if needed.")
+        axes_header = st.columns([0.9, 0.1])
+        with axes_header[0]:
+            st.subheader("📊 Plot Axes Controls")
+        with axes_header[1]:
+            st.markdown("")  # spacing
+            with st.popover("❓"):
+                st.markdown("### Plot Axes Controls Information")
+                st.write("Customize the plot appearance:")
+                st.write("- **X tick step**: Interval for x-axis labels (years)")
+                st.write("- **Y₁ (β) range**: Min/max values for reliability index axis")
+                st.write("- **Y₂ (Pf) range**: Min/max values for failure probability axis")
+                st.write("")
+                st.write("💡 **Tip**: Leave blank or use 0 for automatic scaling")
+                st.write("Run simulation first, then adjust if needed for better visualization")
+        
+        st.info("Leave blank or 0 for auto-scaling. Run simulation first, then adjust if needed.")
         
         col_ax1, col_ax2 = st.columns(2)
         with col_ax1:
