@@ -169,6 +169,49 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, s
     fig.tight_layout()
     return fig
 
+
+# =============================
+# Streamlit helpers: temperature sync & D0 auto-sigma
+# =============================
+
+def _ensure_default(key, val):
+    if key not in st.session_state:
+        st.session_state[key] = val
+
+def _apply_temp_sync(prefix):
+    last = st.session_state.get(f"{prefix}_last", "C")
+    if last == "C":
+        st.session_state[f"{prefix}_K"] = st.session_state[f"{prefix}_C"] + 273.15
+    else:
+        st.session_state[f"{prefix}_C"] = st.session_state[f"{prefix}_K"] - 273.15
+
+def _edit_C(prefix):
+    st.session_state[f"{prefix}_last"] = "C"
+    _apply_temp_sync(prefix)
+
+def _edit_K(prefix):
+    st.session_state[f"{prefix}_last"] = "K"
+    _apply_temp_sync(prefix)
+
+def _copy_sigma(prefix):  # σ(°C) == σ(K)
+    last = st.session_state.get(f"{prefix}_sd_last", "C")
+    if last == "C":
+        st.session_state[f"{prefix}_sd_K"] = st.session_state[f"{prefix}_sd_C"]
+    else:
+        st.session_state[f"{prefix}_sd_C"] = st.session_state[f"{prefix}_sd_K"]
+
+def _edit_sd_C(prefix):
+    st.session_state[f"{prefix}_sd_last"] = "C"
+    _copy_sigma(prefix)
+
+def _edit_sd_K(prefix):
+    st.session_state[f"{prefix}_sd_last"] = "K"
+    _copy_sigma(prefix)
+
+def _d0_mu_changed():
+    st.session_state["d0_sd_val"] = round(st.session_state["d0_mu_val"] * 0.2, 6)
+
+
 # =============================
 # Streamlit App
 # =============================
@@ -176,38 +219,32 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, s
 def main():
     st.set_page_config(page_title="fib Chloride Model", layout="wide", initial_sidebar_state="expanded")
     
-    # Custom CSS to make inputs narrower
+    # ---- CSS: 更窄、更大字体、间距更紧 ----
     st.markdown("""
         <style>
-        /* Make number inputs narrower - 1/10 width */
-        div[data-testid="stNumberInput"] > div > div > input {
-            width: 10% !important;
-            min-width: 100px !important;
-            font-size: 16px !important;
-            padding: 8px !important;
+        /* 数字/文本输入更窄更大 */
+        div[data-testid="stNumberInput"] input,
+        div[data-testid="stTextInput"] input {
+            width: 5% !important;
+            min-width: 80px !important;
+            font-size: 18px !important;
+            padding: 6px 8px !important;
         }
-        /* Make text inputs narrower */
-        div[data-testid="stTextInput"] > div > div > input {
-            width: 10% !important;
-            min-width: 100px !important;
-            font-size: 16px !important;
-            padding: 8px !important;
-        }
-        /* Make selectbox narrower */
+        /* select 更窄 */
         div[data-testid="stSelectbox"] > div > div {
-            width: 25% !important;
-            min-width: 200px !important;
+            width: 18% !important;
+            min-width: 160px !important;
         }
         div[data-testid="stSelectbox"] input {
             font-size: 16px !important;
         }
-        /* Adjust font sizes for better readability */
-        .stMarkdown, .stText {
-            font-size: 14px !important;
+        /* label 与文本更大 */
+        label, .stMarkdown, .stText {
+            font-size: 16px !important;
         }
-        label {
-            font-size: 14px !important;
-        }
+        /* 压缩上下间距 */
+        section.main > div.block-container { padding-top: 0.8rem; padding-bottom: 0.8rem; }
+        .stMarkdown h2, .stMarkdown h3 { margin-top: 0.4rem; margin-bottom: 0.2rem; }
         </style>
     """, unsafe_allow_html=True)
     
@@ -240,12 +277,8 @@ def main():
             st.markdown("")  # spacing
             with st.popover("❓"):
                 st.markdown("### Ageing Exponent (α) Information")
-                st.write("The ageing exponent α describes how the diffusion coefficient decreases over time.")
-                st.write("**Typical values:**")
-                st.write("- Portland Cement: 0.30")
-                st.write("- With Fly Ash: 0.60")
-                st.write("- With Slag: 0.45")
-                st.image("https://via.placeholder.com/300x200?text=Add+Your+Image+Here", caption="Example diagram")
+                st.write("Ageing exponent α 描述扩散系数随时间减小的速率（老化效应）。")
+                st.write("常见范围：0.3~0.6 视体系而定。")
         
         alpha_presets = {
             "Please select": None,
@@ -263,28 +296,22 @@ def main():
         is_custom = (preset_data == "custom")
         
         if preset_data is None:
-            # Please select - show empty locked fields
-            alpha_mu = 0.0
-            alpha_sd = 0.0
-            alpha_L = 0.0
-            alpha_U = 0.0
-            st.number_input("α μ", value=alpha_mu, disabled=True, key="alpha_mu")
-            st.number_input("α σ", value=alpha_sd, disabled=True, key="alpha_sd")
-            st.number_input("α lower bound L", value=alpha_L, disabled=True, key="alpha_L")
-            st.number_input("α upper bound U", value=alpha_U, disabled=True, key="alpha_U")
+            alpha_mu = 0.0; alpha_sd = 0.0; alpha_L = 0.0; alpha_U = 0.0
+            st.number_input("α μ", value=alpha_mu, disabled=True, key="alpha_empty_mu")
+            st.number_input("α σ", value=alpha_sd, disabled=True, key="alpha_empty_sd")
+            st.number_input("α lower bound L", value=alpha_L, disabled=True, key="alpha_empty_L")
+            st.number_input("α upper bound U", value=alpha_U, disabled=True, key="alpha_empty_U")
         elif is_custom:
-            # Custom - editable fields
-            alpha_mu = st.number_input("α μ", value=0.30, min_value=0.0, max_value=1.0, key="alpha_mu")
-            alpha_sd = st.number_input("α σ", value=0.12, min_value=0.0, key="alpha_sd")
-            alpha_L = st.number_input("α lower bound L", value=0.0, min_value=0.0, key="alpha_L")
-            alpha_U = st.number_input("α upper bound U", value=1.0, min_value=0.0, key="alpha_U")
+            alpha_mu = st.number_input("α μ", value=0.30, min_value=0.0, max_value=1.0, key="alpha_custom_mu")
+            alpha_sd = st.number_input("α σ", value=0.12, min_value=0.0, key="alpha_custom_sd")
+            alpha_L  = st.number_input("α lower bound L", value=0.0, min_value=0.0, key="alpha_custom_L")
+            alpha_U  = st.number_input("α upper bound U", value=1.0, min_value=0.0, key="alpha_custom_U")
         else:
-            # Preset selected - show values but locked
             alpha_mu, alpha_sd, alpha_L, alpha_U = preset_data
-            st.number_input("α μ", value=float(alpha_mu), disabled=True, key="alpha_mu")
-            st.number_input("α σ", value=float(alpha_sd), disabled=True, key="alpha_sd")
-            st.number_input("α lower bound L", value=float(alpha_L), disabled=True, key="alpha_L")
-            st.number_input("α upper bound U", value=float(alpha_U), disabled=True, key="alpha_U")
+            st.number_input("α μ", value=float(alpha_mu), disabled=True, key="alpha_locked_mu")
+            st.number_input("α σ", value=float(alpha_sd), disabled=True, key="alpha_locked_sd")
+            st.number_input("α lower bound L", value=float(alpha_L), disabled=True, key="alpha_locked_L")
+            st.number_input("α upper bound U", value=float(alpha_U), disabled=True, key="alpha_locked_U")
         
         # Reference age
         t0_header = st.columns([0.9, 0.1])
@@ -294,11 +321,7 @@ def main():
             st.markdown("")  # spacing
             with st.popover("❓"):
                 st.markdown("### Reference Age (t0) Information")
-                st.write("The reference age represents the concrete age when DRCM test is performed.")
-                st.write("**Common values:**")
-                st.write("- 28 days: Standard testing age")
-                st.write("- 56 days: Extended curing")
-                st.write("- 90 days: Long-term assessment")
+                st.write("t0 是进行 DRCM 测试时的混凝土龄期（折算为年）。")
         
         t0_options = {
             "Please select": None,
@@ -323,16 +346,15 @@ def main():
         Cs_mu = st.number_input("Surface chloride μ (wt-%/binder)", value=3.5, min_value=0.0)
         Cs_sd = st.number_input("Surface chloride σ", value=1.0, min_value=0.0)
         
-        D0_mu = st.number_input("DRCM0 μ (×1e-12 m²/s)", value=10.0, min_value=0.0, key="d0_mu")
-        # Use session state to track D0_sd calculation
-        if 'd0_sd_calc' not in st.session_state:
-            st.session_state.d0_sd_calc = D0_mu * 0.2
-        # Update when D0_mu changes
-        if abs(st.session_state.d0_sd_calc - D0_mu * 0.2) > 0.001:
-            st.session_state.d0_sd_calc = D0_mu * 0.2
-        D0_sd = st.session_state.d0_sd_calc
-        st.number_input("DRCM0 σ (×1e-12 m²/s)", value=D0_sd, disabled=True, key="d0_sd",
-                       help="Auto-calculated as 0.2 × μ")
+        # D0: μ 改变触发 σ=0.2×μ
+        _ensure_default("d0_mu_val", 10.0)
+        _ensure_default("d0_sd_val", round(st.session_state["d0_mu_val"] * 0.2, 6))
+        D0_mu = st.number_input("DRCM0 μ (×1e-12 m²/s)", min_value=0.0, key="d0_mu_val",
+                                on_change=_d0_mu_changed)
+        st.number_input("DRCM0 σ (×1e-12 m²/s)", value=st.session_state["d0_sd_val"],
+                        disabled=True, key="d0_sd_view",
+                        help="Auto = 0.2 × μ（随 μ 变化即刻更新）")
+        D0_sd = float(st.session_state["d0_sd_val"])
         
         cover_mu = st.number_input("Cover μ (mm)", value=50.0, min_value=0.0)
         cover_sd = st.number_input("Cover σ (mm)", value=10.0, min_value=0.0)
@@ -348,12 +370,7 @@ def main():
             st.markdown("")  # spacing
             with st.popover("❓"):
                 st.markdown("### Convection Zone (Δx) Information")
-                st.write("The convection zone represents the depth where chlorides are removed by water flow.")
-                st.write("**Modes:**")
-                st.write("- **Zero**: Fully submerged or spray zone (Δx = 0)")
-                st.write("- **Beta-Submerged**: Partially submerged with locked parameters")
-                st.write("- **Beta-Tidal**: Tidal zone with customizable parameters")
-                st.image("https://via.placeholder.com/300x200?text=Convection+Zone+Diagram", caption="Convection zone illustration")
+                st.write("Δx = 0（完全淹没/喷淋）或 Beta 区间（部分淹没/潮汐区）。")
         
         dx_options = {
             "Please select": None,
@@ -363,124 +380,101 @@ def main():
         }
         dx_choice = st.selectbox("Δx mode", list(dx_options.keys()), key="dx_mode_select")
         dx_mode = dx_options[dx_choice]
+
+        # 准备 Δx 变量的默认值，便于 params.update
+        dx_mu = dx_sd = dx_L = dx_U = 0.0
         
         # Determine if fields should be locked or editable
         if dx_mode is None:
-            # Please select - show empty locked fields
-            dx_mu, dx_sd, dx_L, dx_U = 0.0, 0.0, 0.0, 0.0
-            st.number_input("Δx Beta mean μ (mm)", value=dx_mu, disabled=True, key="dx_mu")
-            st.number_input("Δx Beta SD σ (mm)", value=dx_sd, disabled=True, key="dx_sd")
-            st.number_input("Δx lower bound L (mm)", value=dx_L, disabled=True, key="dx_L")
-            st.number_input("Δx upper bound U (mm)", value=dx_U, disabled=True, key="dx_U")
+            st.number_input("Δx Beta mean μ (mm)", value=0.0, disabled=True, key="dx_empty_mu")
+            st.number_input("Δx Beta SD σ (mm)", value=0.0, disabled=True, key="dx_empty_sd")
+            st.number_input("Δx lower bound L (mm)", value=0.0, disabled=True, key="dx_empty_L")
+            st.number_input("Δx upper bound U (mm)", value=0.0, disabled=True, key="dx_empty_U")
         elif dx_mode == "zero":
-            dx_mu, dx_sd, dx_L, dx_U = 0.0, 0.0, 0.0, 0.0
-            st.number_input("Δx Beta mean μ (mm)", value=dx_mu, disabled=True, key="dx_mu")
-            st.number_input("Δx Beta SD σ (mm)", value=dx_sd, disabled=True, key="dx_sd")
-            st.number_input("Δx lower bound L (mm)", value=dx_L, disabled=True, key="dx_L")
-            st.number_input("Δx upper bound U (mm)", value=dx_U, disabled=True, key="dx_U")
+            st.number_input("Δx Beta mean μ (mm)", value=0.0, disabled=True, key="dx_zero_mu")
+            st.number_input("Δx Beta SD σ (mm)", value=0.0, disabled=True, key="dx_zero_sd")
+            st.number_input("Δx lower bound L (mm)", value=0.0, disabled=True, key="dx_zero_L")
+            st.number_input("Δx upper bound U (mm)", value=0.0, disabled=True, key="dx_zero_U")
             st.info("Δx = 0 for submerged/spray conditions")
         elif dx_mode == "beta_submerged":
             dx_mu, dx_sd, dx_L, dx_U = 8.9, 5.6, 0.0, 50.0
-            st.number_input("Δx Beta mean μ (mm)", value=float(dx_mu), disabled=True, key="dx_mu")
-            st.number_input("Δx Beta SD σ (mm)", value=float(dx_sd), disabled=True, key="dx_sd")
-            st.number_input("Δx lower bound L (mm)", value=float(dx_L), disabled=True, key="dx_L")
-            st.number_input("Δx upper bound U (mm)", value=float(dx_U), disabled=True, key="dx_U")
+            st.number_input("Δx Beta mean μ (mm)", value=float(dx_mu), disabled=True, key="dx_locked_mu")
+            st.number_input("Δx Beta SD σ (mm)", value=float(dx_sd), disabled=True, key="dx_locked_sd")
+            st.number_input("Δx lower bound L (mm)", value=float(dx_L), disabled=True, key="dx_locked_L")
+            st.number_input("Δx upper bound U (mm)", value=float(dx_U), disabled=True, key="dx_locked_U")
         else:  # beta_tidal - editable
-            dx_mu = st.number_input("Δx Beta mean μ (mm)", value=10.0, min_value=0.0, key="dx_mu")
-            dx_sd = st.number_input("Δx Beta SD σ (mm)", value=5.0, min_value=0.0, key="dx_sd")
-            dx_L = st.number_input("Δx lower bound L (mm)", value=0.0, min_value=0.0, key="dx_L")
-            dx_U = st.number_input("Δx upper bound U (mm)", value=50.0, min_value=0.0, key="dx_U")
+            dx_mu = st.number_input("Δx Beta mean μ (mm)", value=10.0, min_value=0.0, key="dx_tidal_mu")
+            dx_sd = st.number_input("Δx Beta SD σ (mm)", value=5.0, min_value=0.0, key="dx_tidal_sd")
+            dx_L  = st.number_input("Δx lower bound L (mm)", value=0.0, min_value=0.0, key="dx_tidal_L")
+            dx_U  = st.number_input("Δx upper bound U (mm)", value=50.0, min_value=0.0, key="dx_tidal_U")
         
-        # Temperature section (moved from left column)
+        # ---------------- Temperature Parameters (bidirectional binding) --------------
         temp_header = st.columns([0.9, 0.1])
         with temp_header[0]:
             st.subheader("🌡️ Temperature Parameters")
         with temp_header[1]:
-            st.markdown("")  # spacing
+            st.markdown("")
             with st.popover("❓"):
                 st.markdown("### Temperature Information")
-                st.write("Temperature affects chloride diffusion through the Arrhenius equation.")
-                st.write("You can input values in either Celsius (°C) or Kelvin (K).")
-                st.write("The conversion is automatic: K = °C + 273")
-        
-        # Use session state to manage temperature values
-        if 'treal_c_val' not in st.session_state:
-            st.session_state.treal_c_val = 20.0
-        if 'treal_sd_val' not in st.session_state:
-            st.session_state.treal_sd_val = 5.0
-        if 'tref_c_val' not in st.session_state:
-            st.session_state.tref_c_val = 23.0
-        
+                st.write("K = °C + 273.15；标准差在 °C 与 K 下数值相同。")
+
+        # 初始化默认值
+        _ensure_default("Treal_C", 20.0)
+        _ensure_default("Treal_K", st.session_state["Treal_C"] + 273.15)
+        _ensure_default("Treal_last", "C")
+        _ensure_default("Treal_sd_C", 5.0)
+        _ensure_default("Treal_sd_K", st.session_state["Treal_sd_C"])
+        _ensure_default("Treal_sd_last", "C")
+
+        _ensure_default("Tref_C", 23.0)
+        _ensure_default("Tref_K", st.session_state["Tref_C"] + 273.15)
+        _ensure_default("Tref_last", "C")
+
         st.write("**Actual Temperature (mean)**")
         temp_mu_cols = st.columns(2)
         with temp_mu_cols[0]:
-            Treal_C = st.number_input("°C", value=st.session_state.treal_c_val, key="treal_c_input", 
-                                      help="Actual temperature in Celsius")
-            st.session_state.treal_c_val = Treal_C
+            st.number_input("°C", key="Treal_C", on_change=_edit_C, args=("Treal",))
         with temp_mu_cols[1]:
-            Treal_K = st.number_input("K", value=st.session_state.treal_c_val + 273, key="treal_k_input",
-                                      help="Actual temperature in Kelvin")
-            # If K changed, update C
-            if abs(Treal_K - (st.session_state.treal_c_val + 273)) > 0.1:
-                st.session_state.treal_c_val = Treal_K - 273
-                st.rerun()
-        Treal_mu = st.session_state.treal_c_val + 273
-        
+            st.number_input("K",  key="Treal_K", on_change=_edit_K, args=("Treal",))
+
         st.write("**Actual Temperature (std dev)**")
         temp_sd_cols = st.columns(2)
         with temp_sd_cols[0]:
-            Treal_sd_C = st.number_input("σ (°C)", value=st.session_state.treal_sd_val, min_value=0.0, 
-                                         key="treal_sd_c_input", help="Temperature standard deviation")
-            st.session_state.treal_sd_val = Treal_sd_C
+            st.number_input("σ (°C)", min_value=0.0, key="Treal_sd_C",
+                            on_change=_edit_sd_C, args=("Treal",))
         with temp_sd_cols[1]:
-            Treal_sd_K = st.number_input("σ (K)", value=st.session_state.treal_sd_val, min_value=0.0, 
-                                         key="treal_sd_k_input", help="Same value as °C for std dev")
-            # If K changed, update C
-            if abs(Treal_sd_K - st.session_state.treal_sd_val) > 0.01:
-                st.session_state.treal_sd_val = Treal_sd_K
-                st.rerun()
-        Treal_sd = st.session_state.treal_sd_val
-        
+            st.number_input("σ (K)",  min_value=0.0, key="Treal_sd_K",
+                            on_change=_edit_sd_K, args=("Treal",))
+
         st.write("**Reference Temperature**")
         temp_ref_cols = st.columns(2)
         with temp_ref_cols[0]:
-            Tref_C = st.number_input("Tref (°C)", value=st.session_state.tref_c_val, key="tref_c_input",
-                                     help="Reference temperature in Celsius")
-            st.session_state.tref_c_val = Tref_C
+            st.number_input("Tref (°C)", key="Tref_C", on_change=_edit_C, args=("Tref",))
         with temp_ref_cols[1]:
-            Tref_K = st.number_input("Tref (K)", value=st.session_state.tref_c_val + 273, key="tref_k_input",
-                                     help="Reference temperature in Kelvin")
-            # If K changed, update C
-            if abs(Tref_K - (st.session_state.tref_c_val + 273)) > 0.1:
-                st.session_state.tref_c_val = Tref_K - 273
-                st.rerun()
-        Tref = st.session_state.tref_c_val + 273
+            st.number_input("Tref (K)",  key="Tref_K", on_change=_edit_K, args=("Tref",))
+
+        # 供模型使用（全部用 K）
+        Treal_mu = float(st.session_state["Treal_K"])
+        Treal_sd = float(st.session_state["Treal_sd_K"])
+        Tref     = float(st.session_state["Tref_K"])
         
-        # Time window & Monte Carlo
+        # ---------------- Time window & Monte Carlo (two columns) ----------------
         time_header = st.columns([0.9, 0.1])
         with time_header[0]:
             st.subheader("⏱️ Time Window & Monte Carlo")
         with time_header[1]:
-            st.markdown("")  # spacing
+            st.markdown("")
             with st.popover("❓"):
                 st.markdown("### Time Window & Monte Carlo Information")
-                st.write("**Time Window:**")
-                st.write("- Start time: When to begin plotting (usually near t0)")
-                st.write("- End time: Design life or target service life")
-                st.write("- Time points: More points = smoother curve but slower computation")
-                st.write("")
-                st.write("**Monte Carlo Simulation:**")
-                st.write("- N samples: Number of random realizations (100,000 recommended)")
-                st.write("- Random seed: For reproducible results")
+                st.write("Start/End/Points 控制时间窗口与采样点；N/Seed 控制蒙特卡洛。")
         
-        # Two columns for time window & Monte Carlo
         time_col1, time_col2 = st.columns(2)
         with time_col1:
             t_start = st.number_input("Plot start time (yr)", value=0.9, min_value=0.0, key="t_start")
-            t_end = st.number_input("Plot end time (Target yr)", value=50.0, min_value=0.1, key="t_end")
+            t_end   = st.number_input("Plot end time (Target yr)", value=50.0, min_value=0.1, key="t_end")
             t_points = st.number_input("Number of time points", value=200, min_value=10, key="t_points")
         with time_col2:
-            N = st.number_input("Monte Carlo samples N", value=100000, min_value=1000, key="n_samples")
+            N    = st.number_input("Monte Carlo samples N", value=100000, min_value=1000, key="n_samples")
             seed = st.number_input("Random seed", value=42, min_value=0, key="seed")
         
         # Target reliability
@@ -488,16 +482,10 @@ def main():
         with target_header[0]:
             st.subheader("🎯 Target Reliability Index")
         with target_header[1]:
-            st.markdown("")  # spacing
+            st.markdown("")
             with st.popover("❓"):
                 st.markdown("### Target Reliability Index (β) Information")
-                st.write("The reliability index β represents the structural safety level.")
-                st.write("**Typical values (ISO 2394, Eurocode):**")
-                st.write("- β = 1.5: Low consequence (50 years)")
-                st.write("- β = 2.3: Medium consequence")
-                st.write("- β = 3.8: High consequence")
-                st.write("")
-                st.write("The plot will show when your structure reaches this target level.")
+                st.write("典型：β=1.5/2.3/3.8 等。")
         
         beta_target = st.number_input("Target β value", value=1.5, min_value=0.0)
         show_beta_target = st.checkbox("Show target β on plot", value=True)
@@ -507,16 +495,10 @@ def main():
         with axes_header[0]:
             st.subheader("📊 Plot Axes Controls")
         with axes_header[1]:
-            st.markdown("")  # spacing
+            st.markdown("")
             with st.popover("❓"):
                 st.markdown("### Plot Axes Controls Information")
-                st.write("Customize the plot appearance:")
-                st.write("- **X tick step**: Interval for x-axis labels (years)")
-                st.write("- **Y₁ (β) range**: Min/max values for reliability index axis")
-                st.write("- **Y₂ (Pf) range**: Min/max values for failure probability axis")
-                st.write("")
-                st.write("💡 **Tip**: Leave blank or use 0 for automatic scaling")
-                st.write("Run simulation first, then adjust if needed for better visualization")
+                st.write("留空或 0 使用自动刻度；先跑图再微调更直观。")
         
         st.info("Leave blank or 0 for auto-scaling. Run simulation first, then adjust if needed.")
         
@@ -555,7 +537,7 @@ def main():
                 return
             t0 = t0_options[t0_choice]
             
-            with st.spinner("Running simulation... This may take a moment."):
+            with st.spinner("Running simulation..."):
                 # Prepare parameters
                 params = {
                     "Cs_mu": Cs_mu, "Cs_sd": Cs_sd,
