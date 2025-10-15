@@ -286,14 +286,39 @@ with right:
 # =============================================================
 if st.button("Run Simulation", type="primary", use_container_width=True):
     if dx_code is None or t0_val is None:
-        st.error("Please complete all selections."); st.stop()
+        st.error("Please complete all selections.")
+        st.stop()
 
-    p = dict(Cs_mu=Cs_mu, Cs_sd=Cs_sd, alpha_mu=αμ, alpha_sd=ασ, alpha_L=αL, alpha_U=αU,
-             D0_mu=D0_mu, D0_sd=D0_sd, cover_mu=cover_mu, cover_sd=cover_sd,
-             Ccrit_mu=Ccrit_mu, Ccrit_sd=Ccrit_sd, Ccrit_L=Ccrit_L, Ccrit_U=Ccrit_U,
-             be_mu=be_mu, be_sd=be_sd, Treal_mu=Treal_mu, Treal_sd=Treal_sd,
-             t0=t0_val, Tref=Tref, C0=C0, dx_mode=dx_code)
+    p = dict(
+        Cs_mu=Cs_mu, Cs_sd=Cs_sd,
+        alpha_mu=αμ, alpha_sd=ασ, alpha_L=αL, alpha_U=αU,
+        D0_mu=D0_mu, D0_sd=D0_sd,
+        cover_mu=cover_mu, cover_sd=cover_sd,
+        Ccrit_mu=Ccrit_mu, Ccrit_sd=Ccrit_sd, Ccrit_L=Ccrit_L, Ccrit_U=Ccrit_U,
+        be_mu=be_mu, be_sd=be_sd,
+        Treal_mu=Treal_mu, Treal_sd=Treal_sd,
+        t0=t0_val, Tref=Tref, C0=C0,
+        dx_mode=dx_code,
+    )
+
     if dx_code in ("beta_submerged", "beta_tidal"):
         p.update(dict(dx_mu=dx_mu, dx_sd=dx_sd, dx_L=dx_L, dx_U=dx_U))
 
-    df = run_fib_chloride(p, N=int(N), seed=int(seed), t_start=0.0, t_end=t_end
+    df = run_fib_chloride(
+        p, N=int(N), seed=int(seed), t_start=0.0, t_end=t_end, t_points=int(t_pts)
+    )
+
+    df_window = df[(df["t_years"] >= float(t_start)) & (df["t_years"] <= float(t_end))].copy()
+
+    fig = plot_beta(
+        df_window,
+        t_end=t_end,
+        axes_cfg=dict(x_tick=x_tick, y1_min=y1_min, y1_max=y1_max, y1_tick=y1_tick),
+        show_pf=show_pf,
+        beta_target=(β_target if show_target else None),
+        show_beta_target=show_target,
+    )
+
+    st.pyplot(fig)
+    st.success("Simulation completed successfully ✅")
+    st.dataframe(df_window.head(10))
