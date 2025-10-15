@@ -1,22 +1,28 @@
-import numpy as np, math, pandas as pd, matplotlib.pyplot as plt
+# app.py
+import math
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import streamlit as st
 from scipy.stats import norm
 from scipy.special import erfc
-import streamlit as st
 
-# =============================
-# Core math (与你给的一致)
-# =============================
+# =============== Streamlit 基本设置 ===============
+st.set_page_config(page_title="fib Chloride Ingress – Reliability", layout="wide")
 
-def beta_from_pf(Pf):
+# =============== 工具函数与模型内核（保持你原公式与逻辑） ===============
+def beta_from_pf(Pf: np.ndarray) -> np.ndarray:
     return -norm.ppf(Pf)
 
 def lognorm_from_mu_sd(rng, n, mu, sd):
+    """Sample lognormal given arithmetic mean mu and std sd."""
     sigma2 = math.log(1 + (sd**2) / (mu**2))
     mu_log = math.log(mu) - 0.5 * sigma2
     sigma = math.sqrt(sigma2)
     return rng.lognormal(mu_log, sigma, n)
 
 def beta01_shapes_from_mean_sd(mu, sd):
+    """Convert mean/sd on [0,1] to Beta(a,b) shapes with clamps for stability."""
     mu = max(min(mu, 1 - 1e-9), 1e-9)
     var = max(sd**2, 1e-12)
     t = mu * (1 - mu) / var - 1
@@ -25,6 +31,7 @@ def beta01_shapes_from_mean_sd(mu, sd):
     return a, b
 
 def beta_interval_from_mean_sd(rng, n, mu, sd, L, U):
+    """Sample Beta on [L, U] given arithmetic mean mu and sd on that interval."""
     if U <= L:
         raise ValueError("Upper bound must be greater than lower bound.")
     mu = max(min(mu, U - 1e-12), L + 1e-12)
@@ -35,6 +42,7 @@ def beta_interval_from_mean_sd(rng, n, mu, sd, L, U):
     return L + (U - L) * rng.beta(a, b, n)
 
 def run_fib_chloride(params, N=100000, seed=42, t_start=0.9, t_end=50.0, t_points=200):
+    """Simulate fib chloride ingress reliability over time. Returns DataFrame with t, Pf, beta."""
     rng = np.random.default_rng(seed)
     t_years = np.linspace(float(t_start), float(t_end), int(t_points))
 
@@ -63,18 +71,18 @@ def run_fib_chloride(params, N=100000, seed=42, t_start=0.9, t_end=50.0, t_point
     else:
         raise ValueError("dx_mode must be one of: zero, beta_submerged, beta_tidal")
 
-    # Distributions
-    Cs    = lognorm_from_mu_sd(rng, N, mu_Cs, sd_Cs)
+    # Parameters distribution
+    Cs = lognorm_from_mu_sd(rng, N, mu_Cs, sd_Cs)
     alpha = beta_interval_from_mean_sd(rng, N, mu_alpha, sd_alpha, alpha_L, alpha_U)
     Ccrit = beta_interval_from_mean_sd(rng, N, mu_Ccrit, sd_Ccrit, Ccrit_L, Ccrit_U)
 
-    D0      = np.maximum(rng.normal(mu_D0, sd_D0, N), 1e-3) * 1e-12
+    D0 = np.maximum(rng.normal(mu_D0, sd_D0, N), 1e-3) * 1e-12
     cover_m = np.maximum(rng.normal(mu_cover, sd_cover, N), 1.0) / 1000.0
-    be      = np.maximum(rng.normal(mu_be, sd_be, N), 1.0)
-    Treal   = np.maximum(rng.normal(mu_Treal, sd_Treal, N), 250.0)
+    be = np.maximum(rng.normal(mu_be, sd_be, N), 1.0)
+    Treal = np.maximum(rng.normal(mu_Treal, sd_Treal, N), 250.0)
 
-    # Model
-    t0_sec  = t0_year * 365.25 * 24 * 3600.0
+    # Formula
+    t0_sec = t0_year * 365.25 * 24 * 3600.0
     temp_fac = np.exp(be * (1.0 / Tref - 1.0 / Treal))
 
     Pf = []
@@ -88,10 +96,6 @@ def run_fib_chloride(params, N=100000, seed=42, t_start=0.9, t_end=50.0, t_point
     Pf = np.clip(np.array(Pf), 1e-12, 1 - 1e-12)
     beta = beta_from_pf(Pf)
     return pd.DataFrame({"t_years": t_years, "Pf": Pf, "beta": beta})
-
-# =============================
-# Plot（与你Tkinter图一致的风格）
-# =============================
 
 def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, show_beta_target=False):
     x_abs = df_window["t_years"].to_numpy()
@@ -139,371 +143,426 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, s
 
     ax1.axvline(float(t_end), linestyle=":", lw=1.5)
 
+    # Target beta line + annotation
     if show_beta_target and beta_target is not None:
-        ax1.axhline(beta_target, color='red', linestyle='--', lw=1.5, label=f'Target β = {beta_target}')
+        ax1.axhline(beta_target, linestyle='--', lw=1.5, label=f'Target β = {beta_target}')
         crossing_year = None
         for i in range(len(y_beta) - 1):
-            if (y_beta[i] >= beta_target and y_beta[i+1] < beta_target) or \
-               (y_beta[i] <= beta_target and y_beta[i+1] > beta_target):
+            if (y_beta[i] - beta_target) * (y_beta[i+1] - beta_target) <= 0:
                 t1, t2 = x_abs[i], x_abs[i+1]
                 b1, b2 = y_beta[i], y_beta[i+1]
-                crossing_year = t1 + (beta_target - b1) * (t2 - t1) / (b2 - b1)
+                if (b2 - b1) != 0:
+                    crossing_year = t1 + (beta_target - b1) * (t2 - t1) / (b2 - b1)
                 break
 
         textstr = f'Target β = {beta_target:.2f}'
         if crossing_year is not None:
             textstr += f'\nYear reached: {crossing_year:.2f} yr'
-            ax1.axvline(crossing_year, color='red', linestyle=':', lw=1.0, alpha=0.7)
+            ax1.axvline(crossing_year, linestyle=':', lw=1.0, alpha=0.7)
         else:
             textstr += '\nNot reached in time range'
 
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
         ax1.text(0.98, 0.98, textstr, transform=ax1.transAxes, fontsize=10,
-                 verticalalignment='top', horizontalalignment='right', bbox=props)
+                 va='top', ha='right', bbox=props)
         ax1.legend(loc='upper left')
 
     fig.tight_layout()
     return fig
 
-# =============================
-# Helpers：稳态同步 + 无spinner
-# =============================
-
-def _ensure_default(key, val):
-    if key not in st.session_state:
-        st.session_state[key] = val
-
-def _two_way_temp(prefix, add=273.0):
+# =============== 轻量 “? 帮助” 组件 ===============
+def help_badge(title_key: str, default_text: str = ""):
     """
-    稳定双向：优先以本轮输入为准；返回 (C, K)
+    右侧显示一个 “?” 小按钮，点击/悬停（取决于Streamlit版本）展开内容区。
+    里边允许输入文字描述和上传一张图片做说明。
     """
-    _ensure_default(f"{prefix}_C", 20.0)
-    _ensure_default(f"{prefix}_K", st.session_state[f"{prefix}_C"] + add)
+    # 尝试使用新版本的 popover；不支持则回退到 expander
+    use_popover = hasattr(st, "popover")
+    if use_popover:
+        with st.popover("?", use_container_width=False):
+            st.caption(f"Help – {title_key}")
+            st.session_state.setdefault(f"help_text_{title_key}", default_text)
+            st.session_state[f"help_text_{title_key}"] = st.text_area(
+                "说明文字（可选）", value=st.session_state[f"help_text_{title_key}"], height=120, label_visibility="collapsed"
+            )
+            img = st.file_uploader("上传一张图片（可选）", type=["png", "jpg", "jpeg"], key=f"help_img_{title_key}")
+            if img:
+                st.image(img, use_container_width=True)
+    else:
+        with st.expander("？"):
+            st.caption(f"Help – {title_key}")
+            st.session_state.setdefault(f"help_text_{title_key}", default_text)
+            st.session_state[f"help_text_{title_key}"] = st.text_area(
+                "说明文字（可选）", value=st.session_state[f"help_text_{title_key}"], height=120, label_visibility="collapsed"
+            )
+            img = st.file_uploader("上传一张图片（可选）", type=["png", "jpg", "jpeg"], key=f"help_img_{title_key}")
+            if img:
+                st.image(img, use_container_width=True)
+
+# =============== 温度双向同步（°C ↔ K）的小工具 ===============
+def sync_ck_pair(label_left: str, label_right: str, key_c: str, key_k: str, default_c=None, default_k=None):
+    """
+    在同一行放两个输入框：左 °C，右 K，双向同步。
+    - 如果用户改 °C：K = C + 273.15
+    - 如果用户改 K：C = K - 273.15
+    """
+    c1, c2 = st.columns(2)
+    # 初始化
+    if key_c not in st.session_state and default_c is not None:
+        st.session_state[key_c] = float(default_c)
+    if key_k not in st.session_state and default_k is not None:
+        st.session_state[key_k] = float(default_k)
+
+    def _on_c_change():
+        try:
+            c = st.session_state[key_c]
+            if c is not None:
+                st.session_state[key_k] = float(c) + 273.15
+        except Exception:
+            pass
+
+    def _on_k_change():
+        try:
+            k = st.session_state[key_k]
+            if k is not None:
+                st.session_state[key_c] = float(k) - 273.15
+        except Exception:
+            pass
+
+    with c1:
+        st.number_input(label_left, key=key_c, value=st.session_state.get(key_c, default_c), on_change=_on_c_change, help="输入或调整摄氏温度（°C）")
+    with c2:
+        st.number_input(label_right, key=key_k, value=st.session_state.get(key_k, default_k), on_change=_on_k_change, help="输入或调整开尔文温度（K）")
+
+# =============== 页面主体布局 ===============
+st.title("fib chloride ingress – reliability index vs time")
+
+# 顶层左右两列：左（主要参数），右（Δx + Temperature + 运行/显示）
+left_col, right_col = st.columns([1.1, 1.0], vertical_alignment="top")
+
+# ---------------- 左列：主要随机参数 + 目标与坐标轴 ----------------
+with left_col:
+    # === Ageing Exponent (α) ===
+    header_cols = st.columns([0.85, 0.15])
+    with header_cols[0]:
+        st.subheader("Ageing Exponent (α)")
+    with header_cols[1]:
+        help_badge("Ageing Exponent (α)", "在此放置关于 α 选择依据的说明或图示。")
+
+    alpha_presets = {
+        "Please select": None,
+        "Portland Cement (PCC)  μ=0.30, σ=0.12": (0.30, 0.12, 0.0, 1.0),
+        "PCC + ≥20% Fly Ash    μ=0.60, σ=0.15": (0.60, 0.15, 0.0, 1.0),
+        "PCC + BFS              μ=0.45, σ=0.20": (0.45, 0.20, 0.0, 1.0),
+        "All types (atmos.)     μ=0.65, σ=0.12": (0.65, 0.12, 0.0, 1.0),
+        "Custom – enter values": None,
+    }
+    alpha_choice = st.selectbox("α Preset", list(alpha_presets.keys()), index=0)
+    alpha_cols = st.columns(4)
+    if alpha_presets.get(alpha_choice):
+        mu_def, sd_def, L_def, U_def = alpha_presets[alpha_choice]
+        alpha_mu = alpha_cols[0].number_input("α μ", value=float(mu_def))
+        alpha_sd = alpha_cols[1].number_input("α σ", value=float(sd_def))
+        alpha_L  = alpha_cols[2].number_input("α lower L", value=float(L_def))
+        alpha_U  = alpha_cols[3].number_input("α upper U", value=float(U_def))
+        disable_alpha = True
+    else:
+        # 自定义
+        alpha_mu = alpha_cols[0].number_input("α μ", value=0.50)
+        alpha_sd = alpha_cols[1].number_input("α σ", value=0.15)
+        alpha_L  = alpha_cols[2].number_input("α lower L", value=0.0)
+        alpha_U  = alpha_cols[3].number_input("α upper U", value=1.0)
+        disable_alpha = False
+
+    st.divider()
+
+    # === Reference Age (t0) ===
+    header_cols = st.columns([0.85, 0.15])
+    with header_cols[0]:
+        st.subheader("Reference Age (t0)")
+    with header_cols[1]:
+        help_badge("Reference Age (t0)", "将 DRCM0 的参考龄期设为常见龄期之一，或自定义。")
+
+    t0_map = {
+        "Please select": None,
+        "0.0767 – 28 days": 0.0767,
+        "0.1533 – 56 days": 0.1533,
+        "0.2464 – 90 days": 0.2464,
+    }
+    t0_choice = st.selectbox("t0 Preset", list(t0_map.keys()), index=0)
+    if t0_map.get(t0_choice) is not None:
+        t0_year = st.number_input("t0 (year)", value=float(t0_map[t0_choice]), disabled=True)
+    else:
+        t0_year = st.number_input("t0 (year)", value=0.0767)
+
+    st.divider()
+
+    # === Editable Parameters（Cs, C0, D0, cover, Ccrit, b_e） ===
+    st.subheader("Material / Exposure Parameters")
+
+    # Chloride surface & initial
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        C0 = st.number_input("Initial chloride C0 (wt-%/binder)", value=0.0)
+    with c2:
+        Cs_mu = st.number_input("Surface chloride μ (wt-%/binder)", value=1.8)
+    with c3:
+        Cs_sd = st.number_input("Surface chloride σ", value=0.3)
+
+    # D0 with auto-sd = 0.2*mu
+    c1, c2 = st.columns(2)
+    with c1:
+        D0_mu = st.number_input("DRCM0 μ (×1e-12 m²/s)", value=10.0)
+    with c2:
+        D0_sd = st.number_input("DRCM0 σ (=0.2×μ)", value=max(0.2*D0_mu, 0.0), disabled=True)
+
+    # cover
+    c1, c2 = st.columns(2)
+    with c1:
+        cover_mu = st.number_input("Cover μ (mm)", value=50.0)
+    with c2:
+        cover_sd = st.number_input("Cover σ (mm)", value=7.0)
+
+    # Ccrit beta interval
+    st.markdown("**Critical chloride content Ccrit (Beta on [L, U])**")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        Ccrit_mu = st.number_input("Ccrit μ (wt-%/binder)", value=0.60)
+    with c2:
+        Ccrit_sd = st.number_input("Ccrit σ", value=0.15)
+    with c3:
+        Ccrit_L  = st.number_input("Ccrit L", value=0.20)
+    with c4:
+        Ccrit_U  = st.number_input("Ccrit U", value=2.00)
+
+    # temperature coefficient b_e
+    c1, c2 = st.columns(2)
+    with c1:
+        be_mu = st.number_input("Temperature coeff (b_e) μ", value=4800.0)
+    with c2:
+        be_sd = st.number_input("Temperature coeff (b_e) σ", value=700.0)
+
+    st.divider()
+
+    # === Target Reliability Index ===
+    header_cols = st.columns([0.85, 0.15])
+    with header_cols[0]:
+        st.subheader("Target Reliability Index")
+    with header_cols[1]:
+        help_badge("Target Reliability Index", "设定目标 β，用于图中参考线与触达年份标注。")
 
     c1, c2 = st.columns(2)
     with c1:
-        new_C = st.number_input("°C" if prefix=="Treal" else "Tref (°C)", value=float(st.session_state[f"{prefix}_C"]), key=f"{prefix}_C_in")
+        beta_target = st.number_input("Target β value (可留空)", value=3.80)
     with c2:
-        new_K = st.number_input("K" if prefix=="Treal" else "Tref (K)",  value=float(st.session_state[f"{prefix}_K"]), key=f"{prefix}_K_in")
+        show_beta_target = st.checkbox("在图中显示目标 β", value=True)
 
-    # 谁变了用谁
-    if float(new_C) != float(st.session_state[f"{prefix}_C"]):
-        st.session_state[f"{prefix}_C"] = float(new_C)
-        st.session_state[f"{prefix}_K"] = float(new_C) + add
-    elif float(new_K) != float(st.session_state[f"{prefix}_K"]):
-        st.session_state[f"{prefix}_K"] = float(new_K)
-        st.session_state[f"{prefix}_C"] = float(new_K) - add
+    st.divider()
 
-    return st.session_state[f"{prefix}_C"], st.session_state[f"{prefix}_K"]
+    # === Plot Axes Controls ===
+    header_cols = st.columns([0.85, 0.15])
+    with header_cols[0]:
+        st.subheader("Plot Axes Controls")
+    with header_cols[1]:
+        help_badge("Plot Axes Controls", "横纵轴范围/刻度（留空=自动）。建议先运行一次再微调。")
 
-def _sigma_equal(prefix, default=5.0):
-    """
-    σ(°C) == σ(K) 强制一致；返回 (σC, σK)
-    """
-    _ensure_default(f"{prefix}_sd_C", default)
-    _ensure_default(f"{prefix}_sd_K", default)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        x_tick = st.number_input("X tick step (years)", value=10.0)
+    with c2:
+        y1_min = st.number_input("Y₁ = β min", value=-2.0)
+    with c3:
+        y1_max = st.number_input("Y₁ = β max", value=5.0)
 
-    s1, s2 = st.columns(2)
-    with s1:
-        new_sC = st.number_input("σ (°C)", value=float(st.session_state[f"{prefix}_sd_C"]), min_value=0.0, key=f"{prefix}_sd_C_in")
-    with s2:
-        new_sK = st.number_input("σ (K)",  value=float(st.session_state[f"{prefix}_sd_K"]), min_value=0.0, key=f"{prefix}_sd_K_in")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        y1_tick = st.number_input("Y₁ = β tick step", value=1.0)
+    with c2:
+        y2_min = st.number_input("Y₂ = Pf min", value=0.0)
+    with c3:
+        y2_max = st.number_input("Y₂ = Pf max", value=1.0)
 
-    if float(new_sC) != float(st.session_state[f"{prefix}_sd_C"]):
-        st.session_state[f"{prefix}_sd_C"] = float(new_sC)
-        st.session_state[f"{prefix}_sd_K"] = float(new_sC)
-    elif float(new_sK) != float(st.session_state[f"{prefix}_sd_K"]):
-        st.session_state[f"{prefix}_sd_K"] = float(new_sK)
-        st.session_state[f"{prefix}_sd_C"] = float(new_sK)
+    c1, c2 = st.columns(2)
+    with c1:
+        y2_tick = st.number_input("Y₂ = Pf tick step", value=0.1)
+    with c2:
+        show_pf = st.checkbox("显示 Pf (failure probability) 曲线", value=True)
 
-    return st.session_state[f"{prefix}_sd_C"], st.session_state[f"{prefix}_sd_K"]
+# ---------------- 右列：Δx、Temperature、时间窗&MC、运行按钮与图 ----------------
+with right_col:
+    # === Convection Zone (Δx) ===
+    header_cols = st.columns([0.85, 0.15])
+    with header_cols[0]:
+        st.subheader("Convection Zone (Δx)")
+    with header_cols[1]:
+        help_badge("Convection Zone (Δx)", "选择 Δx 模式；潮差区可编辑参数，沉没/喷淋可使用预设。")
 
-# =============================
-# App（抄你喜欢的布局）
-# =============================
+    dx_display_to_code = {
+        "Please select": None,
+        "Zero – submerged/spray (Δx = 0)": "zero",
+        "Beta – submerged (locked)": "beta_submerged",
+        "Beta – tidal (editable)": "beta_tidal",
+    }
+    dx_choice = st.selectbox("Δx mode", list(dx_display_to_code.keys()), index=0)
+    dx_mode_internal = dx_display_to_code.get(dx_choice, None)
 
-def main():
-    st.set_page_config(page_title="fib Chloride Model", layout="wide")
+    # Δx 参数区
+    if dx_mode_internal in ("beta_submerged", "beta_tidal"):
+        if dx_mode_internal == "beta_submerged":
+            # 锁定为给定常用值
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                dx_mu = st.number_input("Δx μ (mm)", value=8.9, disabled=True)
+            with col2:
+                dx_sd = st.number_input("Δx σ (mm)", value=5.6, disabled=True)
+            with col3:
+                dx_L  = st.number_input("Δx L (mm)", value=0.0, disabled=True)
+            with col4:
+                dx_U  = st.number_input("Δx U (mm)", value=50.0, disabled=True)
+        else:
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                dx_mu = st.number_input("Δx μ (mm)", value=10.0)
+            with col2:
+                dx_sd = st.number_input("Δx σ (mm)", value=5.0)
+            with col3:
+                dx_L  = st.number_input("Δx L (mm)", value=0.0)
+            with col4:
+                dx_U  = st.number_input("Δx U (mm)", value=50.0)
 
-    # 隐藏所有 number_input 的 +/- 按钮
+    st.divider()
+
+    # === Temperature（放在 Δx 下方；行内双列 C 与 K 同时可编辑） ===
+    header_cols = st.columns([0.85, 0.15])
+    with header_cols[0]:
+        st.subheader("Temperature (Actual & Reference)")
+    with header_cols[1]:
+        help_badge("Temperature", "可同时编辑 °C 与 K，自动双向换算。σ 不变，°C 与 K 的 σ 数值相同。")
+
+    # 实际温度 μ
+    sync_ck_pair("Actual temperature μ (°C)", "Actual temperature μ (K)",
+                 key_c="Treal_mu_C", key_k="Treal_mu_K", default_c=23.0, default_k=296.15)
+    # 实际温度 σ（°C 与 K 的标准差数值一致）
+    c1, c2 = st.columns(2)
+    with c1:
+        Treal_sd_C = st.number_input("Actual temperature σ (°C)", value=3.0, help="标准差不做单位换算，数值一致")
+    with c2:
+        # 同步填写
+        Treal_sd_K = st.number_input("Actual temperature σ (K)", value=Treal_sd_C, help="= σ(°C)")
+
+    # 参考温度
+    sync_ck_pair("Reference temperature Tref (°C)", "Reference temperature Tref (K)",
+                 key_c="Tref_C", key_k="Tref_K", default_c=23.0, default_k=296.15)
+
+    st.divider()
+
+    # === Time Window & Monte Carlo（两列） ===
+    header_cols = st.columns([0.85, 0.15])
+    with header_cols[0]:
+        st.subheader("Time Window & Monte Carlo")
+    with header_cols[1]:
+        help_badge("Time Window & Monte Carlo", "将时间窗参数与 Monte Carlo 总量分成两列，便于快速录入。")
+
+    tw_col1, tw_col2 = st.columns(2)
+    with tw_col1:
+        t_start_disp = st.number_input("Plot start time (yr)", value=0.9)
+        t_end = st.number_input("Plot end time (Target yr)", value=50.0, min_value=0.0)
+        t_points = st.number_input("Number of time points", value=200, min_value=10, step=10)
+    with tw_col2:
+        N = st.number_input("Monte Carlo samples N", value=100000, min_value=1000, step=1000)
+        seed = st.number_input("Random seed", value=42, step=1)
+
+    st.divider()
+
+    # === 运行 & 绘图 ===
+    run_btn = st.button("Run Simulation", type="primary")
+    if run_btn:
+        # 基本校验
+        if alpha_choice == "Please select":
+            st.error("请先选择 α Preset（或用 Custom 自填）。")
+        elif dx_mode_internal is None:
+            st.error("请先选择 Δx 模式。")
+        elif t_end <= t_start_disp:
+            st.error("Plot end time 必须大于 Plot start time。")
+        else:
+            try:
+                # 组装参数
+                params = {
+                    "Cs_mu": float(Cs_mu),
+                    "Cs_sd": float(Cs_sd),
+                    "alpha_mu": float(alpha_mu),
+                    "alpha_sd": float(alpha_sd),
+                    "alpha_L":  float(alpha_L),
+                    "alpha_U":  float(alpha_U),
+                    "D0_mu": float(D0_mu),
+                    "D0_sd": float(max(0.2*D0_mu, 0.0)),  # 自动 = 0.2 × μ
+                    "cover_mu": float(cover_mu),
+                    "cover_sd": float(cover_sd),
+                    "Ccrit_mu": float(Ccrit_mu),
+                    "Ccrit_sd": float(Ccrit_sd),
+                    "Ccrit_L":  float(Ccrit_L),
+                    "Ccrit_U":  float(Ccrit_U),
+                    "be_mu": float(be_mu),
+                    "be_sd": float(be_sd),
+                    "Treal_mu": float(st.session_state.get("Treal_mu_K", 296.15)),  # 用 K
+                    "Treal_sd": float(Treal_sd_K),  # σ 数值相同
+                    "t0": float(t0_year),
+                    "Tref": float(st.session_state.get("Tref_K", 296.15)),  # 用 K
+                    "C0": float(C0),
+                    "dx_mode": dx_mode_internal,
+                }
+                if dx_mode_internal in ("beta_submerged", "beta_tidal"):
+                    params.update({
+                        "dx_mu": float(dx_mu),
+                        "dx_sd": float(dx_sd),
+                        "dx_L":  float(dx_L),
+                        "dx_U":  float(dx_U),
+                    })
+
+                # 先算全域（从 0 → t_end），再裁切显示窗
+                df_full = run_fib_chloride(params, N=int(N), seed=int(seed),
+                                           t_start=0.0, t_end=float(t_end), t_points=int(t_points))
+                df_window = df_full[(df_full["t_years"] >= float(t_start_disp)) &
+                                    (df_full["t_years"] <= float(t_end))].copy()
+                if df_window.empty:
+                    st.error("显示窗口内没有点；请增加时间点数量或调整时间范围。")
+                else:
+                    # 画图
+                    axes_cfg = {
+                        "x_tick":  float(x_tick) if x_tick is not None else None,
+                        "y1_min":  float(y1_min) if y1_min is not None else None,
+                        "y1_max":  float(y1_max) if y1_max is not None else None,
+                        "y1_tick": float(y1_tick) if y1_tick is not None else None,
+                        "y2_min":  float(y2_min) if y2_min is not None else None,
+                        "y2_max":  float(y2_max) if y2_max is not None else None,
+                        "y2_tick": float(y2_tick) if y2_tick is not None else None,
+                    }
+                    fig = plot_beta(
+                        df_window,
+                        t_end=float(t_end),
+                        axes_cfg=axes_cfg,
+                        show_pf=bool(show_pf),
+                        beta_target=float(beta_target) if beta_target is not None else None,
+                        show_beta_target=bool(show_beta_target),
+                    )
+                    st.pyplot(fig)
+
+                    # 数据下载
+                    csv_bytes = df_window.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        "下载当前窗口数据 (CSV)",
+                        data=csv_bytes,
+                        file_name="fib_output_window.csv",
+                        mime="text/csv"
+                    )
+            except Exception as e:
+                st.error(f"输入无效或计算出错：{e}")
+
+# ===============（可选）在最底部附上开关：显示/隐藏更多细节 ===============
+with st.expander("Advanced notes / 调试信息（可选）"):
     st.markdown("""
-        <style>
-        /* Chrome/Safari/Edge */
-        input[type=number]::-webkit-outer-spin-button,
-        input[type=number]::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-        }
-        input[type=number] { -moz-appearance: textfield; } /* Firefox */
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.title("fib Chloride Ingress – Reliability (Streamlit)")
-    st.markdown("---")
-
-    left, right = st.columns(2)
-
-    with left:
-        st.header("Model Parameters")
-
-        # --- Ccrit (locked) ---
-        st.subheader("Critical Chloride Content (Ccrit) – locked")
-        Ccrit_mu = st.number_input("Ccrit μ (wt-%/binder)", value=0.60, disabled=True, key="Ccrit_mu")
-        Ccrit_sd = st.number_input("Ccrit σ", value=0.15, disabled=True, key="Ccrit_sd")
-        Ccrit_L  = st.number_input("Ccrit lower bound L", value=0.20, disabled=True, key="Ccrit_L")
-        Ccrit_U  = st.number_input("Ccrit upper bound U", value=2.00, disabled=True, key="Ccrit_U")
-
-        # --- be (locked) ---
-        st.subheader("Temperature coeff (b_e) – locked")
-        be_mu = st.number_input("Temperature coeff (b_e) μ", value=4800.0, disabled=True, key="be_mu")
-        be_sd = st.number_input("Temperature coeff (b_e) σ", value=700.0, disabled=True, key="be_sd")
-
-        # --- α preset ---
-        st.subheader("Ageing exponent α preset")
-        alpha_presets = {
-            "Please select": None,
-            "Portland Cement (PCC) 0.30 0.12": (0.30, 0.12, 0.0, 1.0),
-            "PCC w/ ≥ 20% Fly Ash 0.60 0.15": (0.60, 0.15, 0.0, 1.0),
-            "PCC w/ Blast Furnace Slag 0.45 0.20": (0.45, 0.20, 0.0, 1.0),
-            "All types (atmospheric zone) 0.65 0.12": (0.65, 0.12, 0.0, 1.0),
-            "Custom – enter values": "custom",
-        }
-        alpha_choice = st.selectbox("α preset", list(alpha_presets.keys()), key="alpha_preset")
-        preset = alpha_presets[alpha_choice]
-
-        if preset is None:
-            alpha_mu = st.number_input("α μ", value=0.0, disabled=True, key="alpha_mu_empty")
-            alpha_sd = st.number_input("α σ", value=0.0, disabled=True, key="alpha_sd_empty")
-            alpha_L  = st.number_input("α lower bound L", value=0.0, disabled=True, key="alpha_L_empty")
-            alpha_U  = st.number_input("α upper bound U", value=0.0, disabled=True, key="alpha_U_empty")
-        elif preset == "custom":
-            alpha_mu = st.number_input("α μ", value=0.30, min_value=0.0, max_value=1.0, key="alpha_mu_custom")
-            alpha_sd = st.number_input("α σ", value=0.12, min_value=0.0, key="alpha_sd_custom")
-            alpha_L  = st.number_input("α lower bound L", value=0.0, min_value=0.0, key="alpha_L_custom")
-            alpha_U  = st.number_input("α upper bound U", value=1.0, min_value=0.0, key="alpha_U_custom")
-        else:
-            a_mu, a_sd, a_L, a_U = preset
-            alpha_mu = st.number_input("α μ", value=float(a_mu), disabled=True, key="alpha_mu_lock")
-            alpha_sd = st.number_input("α σ", value=float(a_sd), disabled=True, key="alpha_sd_lock")
-            alpha_L  = st.number_input("α lower bound L", value=float(a_L), disabled=True, key="alpha_L_lock")
-            alpha_U  = st.number_input("α upper bound U", value=float(a_U), disabled=True, key="alpha_U_lock")
-
-        # --- t0 preset ---
-        st.subheader("Reference age t0 (yr)")
-        t0_options = {
-            "Please select": None,
-            "0.0767 – 28 days": 0.0767,
-            "0.1533 – 56 days": 0.1533,
-            "0.2464 – 90 days": 0.2464,
-        }
-        t0_choice = st.selectbox("t0 preset", list(t0_options.keys()), key="t0_choice")
-        if t0_options[t0_choice] is None:
-            t0 = st.number_input("t0 value (years)", value=0.0, disabled=True, key="t0_val_empty")
-        else:
-            t0 = st.number_input("t0 value (years)", value=t0_options[t0_choice], disabled=True, key="t0_val_lock")
-
-        st.markdown("---")
-        st.subheader("Editable Parameters")
-        C0    = st.number_input("Initial chloride C0 (wt-%/binder)", value=0.0, min_value=0.0, key="C0")
-        Cs_mu = st.number_input("Surface chloride μ (wt-%/binder)", value=3.5, min_value=0.0, key="Cs_mu")
-        Cs_sd = st.number_input("Surface chloride σ", value=1.0, min_value=0.0, key="Cs_sd")
-
-        # D0：σ=0.2×μ（实时）
-        D0_mu = st.number_input("DRCM0 μ (×1e-12 m²/s)", value=10.0, min_value=0.0, key="D0_mu")
-        D0_sd = round(0.2 * float(D0_mu), 6)
-        st.number_input("DRCM0 σ (×1e-12 m²/s)", value=D0_sd, disabled=True, key="D0_sd_view")
-
-        cover_mu = st.number_input("Cover μ (mm)", value=50.0, min_value=0.0, key="cover_mu")
-        cover_sd = st.number_input("Cover σ (mm)", value=10.0, min_value=0.0, key="cover_sd")
-
-    with right:
-        st.header("Δx, Plot Settings")
-
-        # --- Δx preset ---
-        st.subheader("Convection zone Δx")
-        dx_display_to_code = {
-            "Please select": None,
-            "Zero – submerged/spray (Δx = 0)": "zero",
-            "Beta – submerged (locked)": "beta_submerged",
-            "Beta – tidal (editable) – please enter": "beta_tidal",
-        }
-        dx_choice = st.selectbox("Δx mode", list(dx_display_to_code.keys()), key="dx_choice")
-        dx_mode = dx_display_to_code[dx_choice]
-
-        dx_mu = dx_sd = dx_L = dx_U = 0.0
-        if dx_mode is None:
-            st.number_input("Δx Beta mean μ (mm)", value=0.0, disabled=True, key="dx_mu_empty")
-            st.number_input("Δx Beta SD σ (mm)", value=0.0, disabled=True, key="dx_sd_empty")
-            st.number_input("Δx lower bound L (mm)", value=0.0, disabled=True, key="dx_L_empty")
-            st.number_input("Δx upper bound U (mm)", value=0.0, disabled=True, key="dx_U_empty")
-        elif dx_mode == "zero":
-            st.number_input("Δx Beta mean μ (mm)", value=0.0, disabled=True, key="dx_mu_zero")
-            st.number_input("Δx Beta SD σ (mm)", value=0.0, disabled=True, key="dx_sd_zero")
-            st.number_input("Δx lower bound L (mm)", value=0.0, disabled=True, key="dx_L_zero")
-            st.number_input("Δx upper bound U (mm)", value=0.0, disabled=True, key="dx_U_zero")
-            st.info("Δx = 0 for submerged/spray conditions")
-        elif dx_mode == "beta_submerged":
-            dx_mu, dx_sd, dx_L, dx_U = 8.9, 5.6, 0.0, 50.0
-            st.number_input("Δx Beta mean μ (mm)", value=dx_mu, disabled=True, key="dx_mu_lock")
-            st.number_input("Δx Beta SD σ (mm)",   value=dx_sd, disabled=True, key="dx_sd_lock")
-            st.number_input("Δx lower bound L (mm)", value=dx_L, disabled=True, key="dx_L_lock")
-            st.number_input("Δx upper bound U (mm)", value=dx_U, disabled=True, key="dx_U_lock")
-        else:  # beta_tidal
-            dx_mu = st.number_input("Δx Beta mean μ (mm)", value=10.0, min_value=0.0, key="dx_mu_edit")
-            dx_sd = st.number_input("Δx Beta SD σ (mm)",   value=5.0,  min_value=0.0, key="dx_sd_edit")
-            dx_L  = st.number_input("Δx lower bound L (mm)", value=0.0, min_value=0.0, key="dx_L_edit")
-            dx_U  = st.number_input("Δx upper bound U (mm)", value=50.0, min_value=0.0, key="dx_U_edit")
-
-        # --- 温度（C↔K + σ一致；按你代码用 +273） ---
-        st.subheader("Temperature")
-        st.write("**Actual temperature (mean)**")
-        Treal_C, Treal_K = _two_way_temp("Treal", add=273.0)
-
-        st.write("**Actual temperature (std dev)**")
-        Treal_sd_C, Treal_sd_K = _sigma_equal("Treal", default=5.0)
-
-        st.write("**Reference temperature**")
-        Tref_C, Tref_K = _two_way_temp("Tref", add=273.0)
-
-        # 模型用 K
-        Treal_mu = float(Treal_K)
-        Treal_sd = float(Treal_sd_K)
-        Tref     = float(Tref_K)
-
-        st.markdown("---")
-        st.subheader("Time window & Monte Carlo")
-        c1, c2 = st.columns(2)
-        with c1:
-            t_start = st.number_input("Plot start time (yr)", value=0.9, min_value=0.0, key="t_start")
-            t_end   = st.number_input("Plot end time (Target yr)", value=50.0, min_value=0.1, key="t_end")
-            t_points = st.number_input("Number of time points", value=200, min_value=10, key="t_points")
-        with c2:
-            N    = st.number_input("Monte Carlo samples N", value=100000, min_value=1000, key="N")
-            seed = st.number_input("Random seed", value=42, min_value=0, key="seed")
-
-        st.markdown("---")
-        st.subheader("Target Reliability Index")
-        beta_target = st.number_input("Target β value (0 = ignore)", value=0.0, min_value=0.0, key="beta_target")
-        show_beta_target = st.checkbox("Show target β on plot", value=False, key="show_beta")
-
-        st.markdown("---")
-        st.subheader("Axes controls (0 = auto) – RUN FIRST – adjust if needed")
-        ax1, ax2 = st.columns(2)
-        with ax1:
-            x_tick = st.number_input("X tick step (years)", value=10.0, min_value=0.0, key="x_tick")
-            y1_min = st.number_input("Y₁ = β min", value=-2.0, key="y1_min")
-            y1_max = st.number_input("Y₁ = β max", value=5.0,  key="y1_max")
-            y1_tick = st.number_input("Y₁ = β tick step", value=1.0, min_value=0.0, key="y1_tick")
-        with ax2:
-            y2_min = st.number_input("Y₂ = Pf min", value=0.0, min_value=0.0, key="y2_min")
-            y2_max = st.number_input("Y₂ = Pf max", value=1.0, min_value=0.0, key="y2_max")
-            y2_tick = st.number_input("Y₂ = Pf tick step", value=0.1, min_value=0.0, key="y2_tick")
-
-        show_pf = st.checkbox("Show Pf (failure probability) curve", value=True, key="show_pf")
-
-    st.markdown("---")
-    if st.button("Run Simulation", type="primary"):
-        try:
-            # 必选校验
-            if alpha_choice == "Please select":
-                st.error("Please select an α preset.")
-                st.stop()
-            if t0_choice == "Please select":
-                st.error("Please select a reference age t0.")
-                st.stop()
-            if dx_choice == "Please select":
-                st.error("Please select a Δx mode.")
-                st.stop()
-
-            # 取 α（locked/custom 正确对应）
-            preset = alpha_presets[alpha_choice]
-            if preset == "custom":
-                alpha_mu_val = float(st.session_state["alpha_mu_custom"])
-                alpha_sd_val = float(st.session_state["alpha_sd_custom"])
-                alpha_L_val  = float(st.session_state["alpha_L_custom"])
-                alpha_U_val  = float(st.session_state["alpha_U_custom"])
-            elif preset is None:
-                st.error("Invalid α state.")
-                st.stop()
-            else:
-                a_mu, a_sd, a_L, a_U = preset
-                alpha_mu_val = float(a_mu)
-                alpha_sd_val = float(a_sd)
-                alpha_L_val  = float(a_L)
-                alpha_U_val  = float(a_U)
-
-            # Δx（locked 的值用我们上面设的常数；editable 用输入）
-            if dx_mode == "beta_submerged":
-                dx_mu_val, dx_sd_val, dx_L_val, dx_U_val = 8.9, 5.6, 0.0, 50.0
-            elif dx_mode == "beta_tidal":
-                dx_mu_val = float(st.session_state["dx_mu_edit"])
-                dx_sd_val = float(st.session_state["dx_sd_edit"])
-                dx_L_val  = float(st.session_state["dx_L_edit"])
-                dx_U_val  = float(st.session_state["dx_U_edit"])
-            elif dx_mode == "zero":
-                dx_mu_val = dx_sd_val = dx_L_val = dx_U_val = 0.0
-            else:
-                st.error("Invalid Δx mode.")
-                st.stop()
-
-            if t_end <= t_start:
-                st.error("Plot end time must be greater than plot start time.")
-                st.stop()
-
-            # 组装参数（与Tkinter版一致）
-            params = {
-                "Cs_mu": float(Cs_mu), "Cs_sd": float(Cs_sd),
-                "alpha_mu": alpha_mu_val, "alpha_sd": alpha_sd_val,
-                "alpha_L": alpha_L_val, "alpha_U": alpha_U_val,
-                "D0_mu": float(D0_mu), "D0_sd": float(D0_sd),
-                "cover_mu": float(cover_mu), "cover_sd": float(cover_sd),
-                "Ccrit_mu": float(Ccrit_mu), "Ccrit_sd": float(Ccrit_sd),
-                "Ccrit_L": float(Ccrit_L), "Ccrit_U": float(Ccrit_U),
-                "be_mu": float(be_mu), "be_sd": float(be_sd),
-                "Treal_mu": float(Treal_mu), "Treal_sd": float(Treal_sd),
-                "t0": float(t0 if t0_options[t0_choice] is not None else 0.0),
-                "Tref": float(Tref), "C0": float(C0),
-                "dx_mode": dx_mode,
-            }
-            if dx_mode in ("beta_submerged", "beta_tidal"):
-                params.update({"dx_mu": dx_mu_val, "dx_sd": dx_sd_val, "dx_L": dx_L_val, "dx_U": dx_U_val})
-
-            # 运行
-            df_full = run_fib_chloride(params, N=int(N), seed=int(seed),
-                                       t_start=0.0, t_end=float(t_end), t_points=int(t_points))
-            df_window = df_full[(df_full["t_years"] >= float(t_start)) & (df_full["t_years"] <= float(t_end))].copy()
-            if df_window.empty:
-                st.error("Display window has no points; increase number of time points or adjust times.")
-                st.stop()
-
-            # 轴配置（0为自动）
-            axes_cfg = {
-                "x_tick": st.session_state["x_tick"] if st.session_state["x_tick"] > 0 else None,
-                "y1_min": st.session_state["y1_min"] if not (st.session_state["y1_min"] == 0 and st.session_state["y1_max"] == 0) else None,
-                "y1_max": st.session_state["y1_max"] if not (st.session_state["y1_min"] == 0 and st.session_state["y1_max"] == 0) else None,
-                "y1_tick": st.session_state["y1_tick"] if st.session_state["y1_tick"] > 0 else None,
-                "y2_min": st.session_state["y2_min"] if st.session_state["y2_min"] > 0 else None,
-                "y2_max": st.session_state["y2_max"] if st.session_state["y2_max"] > 0 else None,
-                "y2_tick": st.session_state["y2_tick"] if st.session_state["y2_tick"] > 0 else None,
-            }
-
-            beta_target_val = None if (not show_beta_target or beta_target == 0.0) else float(beta_target)
-
-            fig = plot_beta(
-                df_window, t_end=float(t_end), axes_cfg=axes_cfg, show_pf=show_pf,
-                beta_target=beta_target_val, show_beta_target=show_beta_target
-            )
-            st.pyplot(fig)
-
-            st.subheader("Results (first 20 rows)")
-            st.dataframe(df_window.head(20), use_container_width=True)
-
-            csv = df_window.to_csv(index=False)
-            st.download_button("Download CSV", data=csv, file_name="fib_output.csv", mime="text/csv")
-
-            st.success("Simulation completed.")
-        except Exception as e:
-            st.error(f"Invalid input: {e}")
-
-if __name__ == "__main__":
-    main()
+- 本应用保持你原始数学模型与随机分布设定（Cs~Lognormal, α/Ccrit~Beta[L,U]，Δx 三模式）。
+- 温度（实际与参考）统一以 K 进入计算，但提供 °C↔K 双向同步输入。
+- Time Window & Monte Carlo 两列布置；坐标控制与目标 β 提供图上指示。
+- 右侧每个小节标题旁 “?” 可录入图文帮助说明；若部署在云端，请将图片一并推送到仓库或使用上传功能。
+""")
