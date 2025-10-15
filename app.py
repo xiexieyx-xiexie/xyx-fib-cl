@@ -1,4 +1,4 @@
-# app.py (layout tuned per latest request)
+# app.py — updates: α locks on preset, Δx always visible, Axes two-column rows
 import math
 import numpy as np
 import pandas as pd
@@ -9,7 +9,7 @@ from scipy.special import erfc
 
 st.set_page_config(page_title="fib Chloride Ingress – Reliability", layout="wide")
 
-# Hide +/- spinners on all number_inputs (incl. disabled)
+# Hide +/- spinners on number_inputs (incl. disabled)
 st.markdown("""
 <style>
 input[type=number]::-webkit-outer-spin-button,
@@ -196,12 +196,12 @@ def sync_ck_pair(label_left, label_right, key_c, key_k, default_c=None, default_
     def _on_c_change():
         try:
             c = st.session_state[key_c]
-            if c is not None: st.session_state[key_k] = float(c) + 273.15
+            if c is not None: st.session_state[key_k] = float(c) + 273
         except Exception: pass
     def _on_k_change():
         try:
             k = st.session_state[key_k]
-            if k is not None: st.session_state[key_c] = float(k) - 273.15
+            if k is not None: st.session_state[key_c] = float(k) - 273
         except Exception: pass
     with c1:
         st.number_input(label_left, key=key_c,
@@ -216,12 +216,13 @@ def sync_ck_pair(label_left, label_right, key_c, key_k, default_c=None, default_
 st.title("fib chloride ingress – reliability index vs time")
 left_col, right_col = st.columns([1.1, 1.0], vertical_alignment="top")
 
-# ===== LEFT: (1) Model → (2) α → (3) t0 → (4) Editable, all single-column =====
+# ===== LEFT: Model → α → t0 → Editable (single-column sections) =====
 with left_col:
-    # (1) Model Parameters (Locked) — single column
+    # Model Parameters (Locked)
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Model Parameters")
     with hdr[1]: help_badge("Model Parameters", "Ccrit and b_e are locked.")
+
     st.markdown("**🔒 Critical Chloride Content (Ccrit) – Locked**")
     Ccrit_mu = st.number_input("Ccrit μ (wt-%/binder)", value=0.60, disabled=True)
     Ccrit_sd = st.number_input("Ccrit σ", value=0.15, disabled=True)
@@ -234,10 +235,10 @@ with left_col:
 
     st.divider()
 
-    # (2) Ageing Exponent (α) — single column
+    # Ageing Exponent (α) — locks on preset
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Ageing Exponent (α)")
-    with hdr[1]: help_badge("Ageing Exponent (α)", "Guidance/images for choosing α.")
+    with hdr[1]: help_badge("Ageing Exponent (α)", "Choose a preset to lock fields; Custom unlocks.")
     alpha_presets = {
         "Please select": None,
         "Portland Cement (PCC)  μ=0.30, σ=0.12": (0.30, 0.12, 0.0, 1.0),
@@ -247,13 +248,17 @@ with left_col:
         "Custom – enter values": None,
     }
     alpha_choice = st.selectbox("α preset", list(alpha_presets.keys()), index=0)
-    if alpha_presets.get(alpha_choice):
-        mu_def, sd_def, L_def, U_def = alpha_presets[alpha_choice]
-        alpha_mu = st.number_input("α μ", value=float(mu_def))
-        alpha_sd = st.number_input("α σ", value=float(sd_def))
-        alpha_L  = st.number_input("α lower bound L", value=float(L_def))
-        alpha_U  = st.number_input("α upper bound U", value=float(U_def))
+    preset_vals = alpha_presets.get(alpha_choice)
+    is_locked = preset_vals is not None and alpha_choice != "Please select"
+
+    if is_locked:
+        mu_def, sd_def, L_def, U_def = preset_vals
+        alpha_mu = st.number_input("α μ", value=float(mu_def), disabled=True)
+        alpha_sd = st.number_input("α σ", value=float(sd_def), disabled=True)
+        alpha_L  = st.number_input("α lower bound L", value=float(L_def), disabled=True)
+        alpha_U  = st.number_input("α upper bound U", value=float(U_def), disabled=True)
     else:
+        # editable when Custom or Please select
         alpha_mu = st.number_input("α μ", value=0.50)
         alpha_sd = st.number_input("α σ", value=0.15)
         alpha_L  = st.number_input("α lower bound L", value=0.0)
@@ -261,7 +266,7 @@ with left_col:
 
     st.divider()
 
-    # (3) Reference Age (t0) — single column, compact decimals
+    # Reference Age (t0) — compact decimals
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Reference Age (t0)")
     with hdr[1]: help_badge("Reference Age (t0)", "Pick a common age or enter custom.")
@@ -280,24 +285,24 @@ with left_col:
 
     st.divider()
 
-    # (4) Editable Parameters — single column
+    # Editable Parameters
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Editable Parameters")
     with hdr[1]: help_badge("Editable Parameters", "C0, surface chloride, DRCM0, cover.")
-    C0    = st.number_input("Initial chloride C0 (wt-%/binder)", value=0.0)
-    Cs_mu = st.number_input("Surface chloride μ (wt-%/binder)", value=1.8)
-    Cs_sd = st.number_input("Surface chloride σ", value=0.3)
-    D0_mu = st.number_input("DRCM0 μ (×1e-12 m²/s)", value=10.0)
-    D0_sd = st.number_input("DRCM0 σ (=0.2×μ)", value=max(0.2*D0_mu, 0.0), disabled=True)
+    C0       = st.number_input("Initial chloride C0 (wt-%/binder)", value=0.0)
+    Cs_mu    = st.number_input("Surface chloride μ (wt-%/binder)", value=1.8)
+    Cs_sd    = st.number_input("Surface chloride σ", value=0.3)
+    D0_mu    = st.number_input("DRCM0 μ (×1e-12 m²/s)", value=10.0)
+    D0_sd    = st.number_input("DRCM0 σ (=0.2×μ)", value=max(0.2*D0_mu, 0.0), disabled=True)
     cover_mu = st.number_input("Cover μ (mm)", value=50.0)
     cover_sd = st.number_input("Cover σ (mm)", value=7.0)
 
-# ===== RIGHT: Δx (single) → Temperature (two-col) → Time Window (two-col) → Target β (single) → Axes (multi) =====
+# ===== RIGHT: Δx (always shown) → Temperature (2-col) → Time Window (2-col) → Target β → Axes (2-col rows) =====
 with right_col:
-    # Δx — single column
+    # Convection Zone (Δx) — always visible
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Convection Zone (Δx)")
-    with hdr[1]: help_badge("Convection Zone (Δx)", "Pick mode; tidal is editable, submerged is locked.")
+    with hdr[1]: help_badge("Convection Zone (Δx)", "Zero shows disabled zeros; submerged locked; tidal editable.")
     dx_display_to_code = {
         "Please select": None,
         "Zero – submerged/spray (Δx = 0)": "zero",
@@ -306,21 +311,29 @@ with right_col:
     }
     dx_choice = st.selectbox("Δx mode", list(dx_display_to_code.keys()), index=0)
     dx_mode_internal = dx_display_to_code.get(dx_choice, None)
-    if dx_mode_internal in ("beta_submerged", "beta_tidal"):
-        if dx_mode_internal == "beta_submerged":
-            dx_mu = st.number_input("Δx mean μ (mm)", value=8.9, disabled=True)
-            dx_sd = st.number_input("Δx SD σ (mm)", value=5.6, disabled=True)
-            dx_L  = st.number_input("Δx lower bound L (mm)", value=0.0, disabled=True)
-            dx_U  = st.number_input("Δx upper bound U (mm)", value=50.0, disabled=True)
-        else:
-            dx_mu = st.number_input("Δx mean μ (mm)", value=10.0)
-            dx_sd = st.number_input("Δx SD σ (mm)", value=5.0)
-            dx_L  = st.number_input("Δx lower bound L (mm)", value=0.0)
-            dx_U  = st.number_input("Δx upper bound U (mm)", value=50.0)
+
+    # defaults + disable logic
+    if dx_mode_internal == "zero":
+        dx_mu_val, dx_sd_val, dx_L_val, dx_U_val = 0.0, 0.0, 0.0, 0.0
+        disabled = True
+    elif dx_mode_internal == "beta_submerged":
+        dx_mu_val, dx_sd_val, dx_L_val, dx_U_val = 8.9, 5.6, 0.0, 50.0
+        disabled = True
+    elif dx_mode_internal == "beta_tidal":
+        dx_mu_val, dx_sd_val, dx_L_val, dx_U_val = 10.0, 5.0, 0.0, 50.0
+        disabled = False
+    else:
+        dx_mu_val, dx_sd_val, dx_L_val, dx_U_val = 0.0, 0.0, 0.0, 0.0
+        disabled = True
+
+    dx_mu = st.number_input("Δx mean μ (mm)", value=float(dx_mu_val), disabled=disabled)
+    dx_sd = st.number_input("Δx SD σ (mm)", value=float(dx_sd_val), disabled=disabled)
+    dx_L  = st.number_input("Δx lower bound L (mm)", value=float(dx_L_val), disabled=disabled)
+    dx_U  = st.number_input("Δx upper bound U (mm)", value=float(dx_U_val), disabled=disabled)
 
     st.divider()
 
-    # Temperature — two columns (C/K sync)
+    # Temperature — two columns
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Temperature Parameters")
     with hdr[1]: help_badge("Temperature Parameters", "Two-column C/K inputs with sync; σ same value.")
@@ -353,26 +366,36 @@ with right_col:
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Target Reliability Index")
     with hdr[1]: help_badge("Target Reliability Index", "Draw a target β line and annotate crossing year.")
-    beta_target     = st.number_input("Target β value (optional)", value=3.80)
+    beta_target      = st.number_input("Target β value (optional)", value=3.80)
     show_beta_target = st.checkbox("Show target β on plot", value=True)
 
     st.divider()
 
-    # Plot Axes Controls — multi-column
+    # Plot Axes Controls — TWO-COLUMN rows as specified
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Plot Axes Controls")
-    with hdr[1]: help_badge("Plot Axes Controls", "Leave blank/0 for auto; run once then fine-tune.")
-    c1, c2, c3 = st.columns(3)
-    with c1: x_tick = st.number_input("X tick step (years)", value=10.0)
-    with c2: y1_min = st.number_input("Y₁ (β) min", value=-2.0)
-    with c3: y1_max = st.number_input("Y₁ (β) max", value=5.0)
-    c1, c2, c3 = st.columns(3)
-    with c1: y1_tick = st.number_input("Y₁ (β) tick step", value=1.0)
-    with c2: y2_min  = st.number_input("Y₂ (Pf) min", value=0.0)
-    with c3: y2_max  = st.number_input("Y₂ (Pf) max", value=1.0)
-    c1, c2 = st.columns(2)
-    with c1: y2_tick = st.number_input("Y₂ (Pf) tick step", value=0.1)
-    with c2: show_pf  = st.checkbox("Show Pf (failure probability) curve", value=True)
+    with hdr[1]: help_badge("Plot Axes Controls", "Exact two-column row layout per spec.")
+
+    # Row 1: X tick step (years) — single full-width
+    x_tick = st.number_input("X tick step (years)", value=10.0)
+
+    # Row 2: Y1 tick step — single full-width
+    y1_tick = st.number_input("Y₁ (β) tick step", value=1.0)
+
+    # Row 3: Y1 min | max — two columns
+    r3c1, r3c2 = st.columns(2)
+    with r3c1: y1_min = st.number_input("Y₁ (β) min", value=-2.0)
+    with r3c2: y1_max = st.number_input("Y₁ (β) max", value=5.0)
+
+    # Row 4: Y2 tick step — single full-width
+    y2_tick = st.number_input("Y₂ (Pf) tick step", value=0.1)
+
+    # Row 5: Y2 min | max — two columns
+    r5c1, r5c2 = st.columns(2)
+    with r5c1: y2_min = st.number_input("Y₂ (Pf) min", value=0.0)
+    with r5c2: y2_max = st.number_input("Y₂ (Pf) max", value=1.0)
+
+    show_pf = st.checkbox("Show Pf (failure probability) curve", value=True)
 
     st.divider()
 
