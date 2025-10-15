@@ -176,6 +176,34 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, s
 def main():
     st.set_page_config(page_title="fib Chloride Model", layout="wide", initial_sidebar_state="expanded")
     
+    # Custom CSS to make inputs narrower
+    st.markdown("""
+        <style>
+        /* Make number inputs narrower */
+        div[data-testid="stNumberInput"] > div > div > input {
+            width: 33% !important;
+            min-width: 150px !important;
+        }
+        /* Make text inputs narrower */
+        div[data-testid="stTextInput"] > div > div > input {
+            width: 33% !important;
+            min-width: 150px !important;
+        }
+        /* Make selectbox narrower */
+        div[data-testid="stSelectbox"] > div > div {
+            width: 33% !important;
+            min-width: 200px !important;
+        }
+        /* Adjust font sizes for better readability */
+        .stMarkdown, .stText {
+            font-size: 14px !important;
+        }
+        label {
+            font-size: 14px !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
     st.title("🔬 fib Chloride Ingress Model - Reliability Analysis")
     st.markdown("---")
     
@@ -213,24 +241,39 @@ def main():
                 st.image("https://via.placeholder.com/300x200?text=Add+Your+Image+Here", caption="Example diagram")
         
         alpha_presets = {
+            "Please select": None,
             "Portland Cement (PCC) 0.30 0.12": (0.30, 0.12, 0.0, 1.0),
             "PCC w/ ≥ 20% Fly Ash 0.60 0.15": (0.60, 0.15, 0.0, 1.0),
             "PCC w/ Blast Furnace Slag 0.45 0.20": (0.45, 0.20, 0.0, 1.0),
             "All types (atmospheric zone) 0.65 0.12": (0.65, 0.12, 0.0, 1.0),
-            "Custom – enter values": None,
+            "Custom – enter values": "custom",
         }
-        alpha_choice = st.selectbox("α preset", list(alpha_presets.keys()))
+        alpha_choice = st.selectbox("α preset", list(alpha_presets.keys()), key="alpha_preset")
         
-        if alpha_presets[alpha_choice] is not None:
-            alpha_mu, alpha_sd, alpha_L, alpha_U = alpha_presets[alpha_choice]
-            st.text(f"α μ = {alpha_mu}")
-            st.text(f"α σ = {alpha_sd}")
-            st.text(f"α bounds: [{alpha_L}, {alpha_U}]")
+        # Determine if fields should be locked
+        preset_data = alpha_presets[alpha_choice]
+        is_locked = (preset_data is not None and preset_data != "custom")
+        is_custom = (preset_data == "custom")
+        
+        if preset_data is None:
+            # Please select - show empty locked fields
+            alpha_mu = st.number_input("α μ", value=0.0, disabled=True, key="alpha_mu")
+            alpha_sd = st.number_input("α σ", value=0.0, disabled=True, key="alpha_sd")
+            alpha_L = st.number_input("α lower bound L", value=0.0, disabled=True, key="alpha_L")
+            alpha_U = st.number_input("α upper bound U", value=0.0, disabled=True, key="alpha_U")
+        elif is_custom:
+            # Custom - editable fields
+            alpha_mu = st.number_input("α μ", value=0.30, min_value=0.0, max_value=1.0, key="alpha_mu")
+            alpha_sd = st.number_input("α σ", value=0.12, min_value=0.0, key="alpha_sd")
+            alpha_L = st.number_input("α lower bound L", value=0.0, min_value=0.0, key="alpha_L")
+            alpha_U = st.number_input("α upper bound U", value=1.0, min_value=0.0, key="alpha_U")
         else:
-            alpha_mu = st.number_input("α μ", value=0.30, min_value=0.0, max_value=1.0)
-            alpha_sd = st.number_input("α σ", value=0.12, min_value=0.0)
-            alpha_L = st.number_input("α lower bound L", value=0.0, min_value=0.0)
-            alpha_U = st.number_input("α upper bound U", value=1.0, min_value=0.0)
+            # Preset selected - show values but locked
+            alpha_mu, alpha_sd, alpha_L, alpha_U = preset_data
+            st.number_input("α μ", value=alpha_mu, disabled=True, key="alpha_mu")
+            st.number_input("α σ", value=alpha_sd, disabled=True, key="alpha_sd")
+            st.number_input("α lower bound L", value=alpha_L, disabled=True, key="alpha_L")
+            st.number_input("α upper bound U", value=alpha_U, disabled=True, key="alpha_U")
         
         # Reference age
         t0_header = st.columns([0.9, 0.1])
@@ -268,77 +311,6 @@ def main():
         
         cover_mu = st.number_input("Cover μ (mm)", value=50.0, min_value=0.0)
         cover_sd = st.number_input("Cover σ (mm)", value=10.0, min_value=0.0)
-        
-        # Temperature section with C and K in columns
-        temp_header = st.columns([0.9, 0.1])
-        with temp_header[0]:
-            st.subheader("🌡️ Temperature Parameters")
-        with temp_header[1]:
-            st.markdown("")  # spacing
-            with st.popover("❓"):
-                st.markdown("### Temperature Information")
-                st.write("Temperature affects chloride diffusion through the Arrhenius equation.")
-                st.write("You can input values in either Celsius (°C) or Kelvin (K).")
-                st.write("The conversion is automatic: K = °C + 273")
-        
-        # Initialize session state for temperature sync
-        if 'temp_sync' not in st.session_state:
-            st.session_state.temp_sync = True
-        
-        st.write("**Actual Temperature (mean)**")
-        temp_mu_cols = st.columns(2)
-        with temp_mu_cols[0]:
-            Treal_C = st.number_input("°C", value=20.0, key="treal_c", 
-                                      help="Actual temperature in Celsius")
-        with temp_mu_cols[1]:
-            Treal_mu = st.number_input("K", value=293.0, key="treal_k",
-                                       help="Actual temperature in Kelvin")
-        
-        # Sync logic
-        if abs(Treal_mu - (Treal_C + 273)) > 0.1:
-            # User changed one, update the other based on last changed
-            if st.session_state.get('last_temp_mu_change') == 'C':
-                st.session_state.treal_k = Treal_C + 273
-                st.rerun()
-            else:
-                st.session_state.treal_c = Treal_mu - 273
-                st.rerun()
-        
-        st.write("**Actual Temperature (std dev)**")
-        temp_sd_cols = st.columns(2)
-        with temp_sd_cols[0]:
-            Treal_sd_C = st.number_input("σ (°C)", value=5.0, min_value=0.0, key="treal_sd_c",
-                                         help="Temperature standard deviation")
-        with temp_sd_cols[1]:
-            Treal_sd = st.number_input("σ (K)", value=5.0, min_value=0.0, key="treal_sd_k",
-                                       help="Same as °C for std dev")
-        
-        # Sync std dev
-        if abs(Treal_sd - Treal_sd_C) > 0.01:
-            if st.session_state.get('last_temp_sd_change') == 'C':
-                st.session_state.treal_sd_k = Treal_sd_C
-                st.rerun()
-            else:
-                st.session_state.treal_sd_c = Treal_sd
-                st.rerun()
-        
-        st.write("**Reference Temperature**")
-        temp_ref_cols = st.columns(2)
-        with temp_ref_cols[0]:
-            Tref_C = st.number_input("Tref (°C)", value=23.0, key="tref_c",
-                                     help="Reference temperature in Celsius")
-        with temp_ref_cols[1]:
-            Tref = st.number_input("Tref (K)", value=296.0, key="tref_k",
-                                   help="Reference temperature in Kelvin")
-        
-        # Sync reference temp
-        if abs(Tref - (Tref_C + 273)) > 0.1:
-            if st.session_state.get('last_temp_ref_change') == 'C':
-                st.session_state.tref_k = Tref_C + 273
-                st.rerun()
-            else:
-                st.session_state.tref_c = Tref - 273
-                st.rerun()
     
     with col2:
         st.header("⚙️ Simulation Settings")
@@ -359,24 +331,96 @@ def main():
                 st.image("https://via.placeholder.com/300x200?text=Convection+Zone+Diagram", caption="Convection zone illustration")
         
         dx_options = {
+            "Please select": None,
             "Zero – submerged/spray (Δx = 0)": "zero",
             "Beta – submerged (locked)": "beta_submerged",
             "Beta – tidal (editable)": "beta_tidal",
         }
-        dx_choice = st.selectbox("Δx mode", list(dx_options.keys()))
+        dx_choice = st.selectbox("Δx mode", list(dx_options.keys()), key="dx_mode_select")
         dx_mode = dx_options[dx_choice]
         
-        if dx_mode == "zero":
+        # Determine if fields should be locked or editable
+        if dx_mode is None:
+            # Please select - show empty locked fields
+            st.number_input("Δx Beta mean μ (mm)", value=0.0, disabled=True, key="dx_mu")
+            st.number_input("Δx Beta SD σ (mm)", value=0.0, disabled=True, key="dx_sd")
+            st.number_input("Δx lower bound L (mm)", value=0.0, disabled=True, key="dx_L")
+            st.number_input("Δx upper bound U (mm)", value=0.0, disabled=True, key="dx_U")
             dx_mu, dx_sd, dx_L, dx_U = 0, 0, 0, 0
+        elif dx_mode == "zero":
+            dx_mu, dx_sd, dx_L, dx_U = 0, 0, 0, 0
+            st.number_input("Δx Beta mean μ (mm)", value=0.0, disabled=True, key="dx_mu")
+            st.number_input("Δx Beta SD σ (mm)", value=0.0, disabled=True, key="dx_sd")
+            st.number_input("Δx lower bound L (mm)", value=0.0, disabled=True, key="dx_L")
+            st.number_input("Δx upper bound U (mm)", value=0.0, disabled=True, key="dx_U")
             st.info("Δx = 0 for submerged/spray conditions")
         elif dx_mode == "beta_submerged":
-            dx_mu, dx_sd, dx_L, dx_U = 8.9, 5.6, 0, 50
-            st.text(f"Δx Beta: μ={dx_mu}, σ={dx_sd}, bounds=[{dx_L}, {dx_U}] mm")
-        else:  # beta_tidal
-            dx_mu = st.number_input("Δx Beta mean μ (mm)", value=10.0, min_value=0.0)
-            dx_sd = st.number_input("Δx Beta SD σ (mm)", value=5.0, min_value=0.0)
-            dx_L = st.number_input("Δx lower bound L (mm)", value=0.0, min_value=0.0)
-            dx_U = st.number_input("Δx upper bound U (mm)", value=50.0, min_value=0.0)
+            dx_mu, dx_sd, dx_L, dx_U = 8.9, 5.6, 0.0, 50.0
+            st.number_input("Δx Beta mean μ (mm)", value=dx_mu, disabled=True, key="dx_mu")
+            st.number_input("Δx Beta SD σ (mm)", value=dx_sd, disabled=True, key="dx_sd")
+            st.number_input("Δx lower bound L (mm)", value=dx_L, disabled=True, key="dx_L")
+            st.number_input("Δx upper bound U (mm)", value=dx_U, disabled=True, key="dx_U")
+        else:  # beta_tidal - editable
+            dx_mu = st.number_input("Δx Beta mean μ (mm)", value=10.0, min_value=0.0, key="dx_mu")
+            dx_sd = st.number_input("Δx Beta SD σ (mm)", value=5.0, min_value=0.0, key="dx_sd")
+            dx_L = st.number_input("Δx lower bound L (mm)", value=0.0, min_value=0.0, key="dx_L")
+            dx_U = st.number_input("Δx upper bound U (mm)", value=50.0, min_value=0.0, key="dx_U")
+        
+        # Temperature section (moved from left column)
+        temp_header = st.columns([0.9, 0.1])
+        with temp_header[0]:
+            st.subheader("🌡️ Temperature Parameters")
+        with temp_header[1]:
+            st.markdown("")  # spacing
+            with st.popover("❓"):
+                st.markdown("### Temperature Information")
+                st.write("Temperature affects chloride diffusion through the Arrhenius equation.")
+                st.write("You can input values in either Celsius (°C) or Kelvin (K).")
+                st.write("The conversion is automatic: K = °C + 273")
+        
+        st.write("**Actual Temperature (mean)**")
+        temp_mu_cols = st.columns(2)
+        with temp_mu_cols[0]:
+            Treal_C = st.number_input("°C", value=20.0, key="treal_c", 
+                                      help="Actual temperature in Celsius")
+            Treal_mu = Treal_C + 273
+        with temp_mu_cols[1]:
+            Treal_K_display = st.number_input("K", value=Treal_C + 273, key="treal_k_display",
+                                              help="Actual temperature in Kelvin")
+            # If user edits K field, update C
+            if abs(Treal_K_display - (Treal_C + 273)) > 0.1:
+                Treal_C = Treal_K_display - 273
+                Treal_mu = Treal_K_display
+            else:
+                Treal_mu = Treal_C + 273
+        
+        st.write("**Actual Temperature (std dev)**")
+        temp_sd_cols = st.columns(2)
+        with temp_sd_cols[0]:
+            Treal_sd_C = st.number_input("σ (°C)", value=5.0, min_value=0.0, key="treal_sd_c",
+                                         help="Temperature standard deviation")
+            Treal_sd = Treal_sd_C
+        with temp_sd_cols[1]:
+            Treal_sd_K_display = st.number_input("σ (K)", value=Treal_sd_C, min_value=0.0, key="treal_sd_k_display",
+                                                 help="Same as °C for std dev")
+            if abs(Treal_sd_K_display - Treal_sd_C) > 0.01:
+                Treal_sd = Treal_sd_K_display
+            else:
+                Treal_sd = Treal_sd_C
+        
+        st.write("**Reference Temperature**")
+        temp_ref_cols = st.columns(2)
+        with temp_ref_cols[0]:
+            Tref_C = st.number_input("Tref (°C)", value=23.0, key="tref_c",
+                                     help="Reference temperature in Celsius")
+            Tref = Tref_C + 273
+        with temp_ref_cols[1]:
+            Tref_K_display = st.number_input("Tref (K)", value=Tref_C + 273, key="tref_k_display",
+                                            help="Reference temperature in Kelvin")
+            if abs(Tref_K_display - (Tref_C + 273)) > 0.1:
+                Tref = Tref_K_display
+            else:
+                Tref = Tref_C + 273
         
         # Time window & Monte Carlo
         time_header = st.columns([0.9, 0.1])
@@ -456,6 +500,17 @@ def main():
     st.markdown("---")
     if st.button("🚀 Run Simulation", type="primary", use_container_width=True):
         try:
+            # Validation checks
+            if alpha_choice == "Please select":
+                st.error("❌ Please select an α preset (Ageing exponent)")
+                return
+            if t0_choice == "Please select":
+                st.error("❌ Please select a reference age t0")
+                return
+            if dx_choice == "Please select":
+                st.error("❌ Please select a Δx mode")
+                return
+            
             with st.spinner("Running simulation... This may take a moment."):
                 # Prepare parameters
                 params = {
