@@ -4,7 +4,7 @@ from scipy.special import erfc
 import streamlit as st
 
 # =============================
-# Core math-xyx (与Tkinter版一致)
+# Core math (与你给的一致)
 # =============================
 
 def beta_from_pf(Pf):
@@ -90,7 +90,7 @@ def run_fib_chloride(params, N=100000, seed=42, t_start=0.9, t_end=50.0, t_point
     return pd.DataFrame({"t_years": t_years, "Pf": Pf, "beta": beta})
 
 # =============================
-# Plot (等价于你Tkinter版的风格)
+# Plot（按你原风格）
 # =============================
 
 def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, show_beta_target=False):
@@ -139,7 +139,6 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, s
 
     ax1.axvline(float(t_end), linestyle=":", lw=1.5)
 
-    # Target β annotation
     if show_beta_target and beta_target is not None:
         ax1.axhline(beta_target, color='red', linestyle='--', lw=1.5, label=f'Target β = {beta_target}')
         crossing_year = None
@@ -167,49 +166,69 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, s
     return fig
 
 # =============================
-# Streamlit helpers (只补功能，不动你布局风格)
+# Helpers（稳态同步，不靠脆弱回调）
 # =============================
 
 def _ensure_default(key, val):
     if key not in st.session_state:
         st.session_state[key] = val
 
-# 温度双向联动 + σ一致
-def _apply_temp_sync(prefix):
-    last = st.session_state.get(f"{prefix}_last", "C")
-    if last == "C":
-        st.session_state[f"{prefix}_K"] = st.session_state[f"{prefix}_C"] + 273.15
-    else:
-        st.session_state[f"{prefix}_C"] = st.session_state[f"{prefix}_K"] - 273.15
+def _temp_block(prefix, label_c="°C", label_k="K", use_273=True):
+    """
+    稳定的双向绑定：优先以 last_edit 决定另一边。
+    use_273=True => K = C + 273（与你原Tkinter一致）
+    """
+    add = 273 if use_273 else 273.15
 
-def _edit_C(prefix):
-    st.session_state[f"{prefix}_last"] = "C"
-    _apply_temp_sync(prefix)
+    _ensure_default(f"{prefix}_C", 20.0)
+    _ensure_default(f"{prefix}_K", st.session_state[f"{prefix}_C"] + add)
+    _ensure_default(f"{prefix}_last", "C")
 
-def _edit_K(prefix):
-    st.session_state[f"{prefix}_last"] = "K"
-    _apply_temp_sync(prefix)
+    c1, c2 = st.columns(2)
+    with c1:
+        vC = st.number_input(label_c, key=f"{prefix}_C_input", value=float(st.session_state[f"{prefix}_C"]))
+    with c2:
+        vK = st.number_input(label_k, key=f"{prefix}_K_input", value=float(st.session_state[f"{prefix}_K"]))
 
-def _copy_sigma(prefix):
-    last = st.session_state.get(f"{prefix}_sd_last", "C")
-    if last == "C":
-        st.session_state[f"{prefix}_sd_K"] = st.session_state[f"{prefix}_sd_C"]
-    else:
-        st.session_state[f"{prefix}_sd_C"] = st.session_state[f"{prefix}_sd_K"]
+    # 判断用户改变了哪一个（和 session 旧值比较）
+    if vC != st.session_state[f"{prefix}_C"]:
+        st.session_state[f"{prefix}_last"] = "C"
+        st.session_state[f"{prefix}_C"] = float(vC)
+        st.session_state[f"{prefix}_K"] = float(vC) + add
+    elif vK != st.session_state[f"{prefix}_K"]:
+        st.session_state[f"{prefix}_last"] = "K"
+        st.session_state[f"{prefix}_K"] = float(vK)
+        st.session_state[f"{prefix}_C"] = float(vK) - add
 
-def _edit_sd_C(prefix):
-    st.session_state[f"{prefix}_sd_last"] = "C"
-    _copy_sigma(prefix)
+    return st.session_state[f"{prefix}_C"], st.session_state[f"{prefix}_K"]
 
-def _edit_sd_K(prefix):
-    st.session_state[f"{prefix}_sd_last"] = "K"
-    _copy_sigma(prefix)
+def _sigma_equal_block(prefix):
+    """
+    σ(°C) == σ(K)：提供两个输入，但任何一边变化都把另一个设为相同数值。
+    """
+    _ensure_default(f"{prefix}_sd_C", 5.0)
+    _ensure_default(f"{prefix}_sd_K", st.session_state[f"{prefix}_sd_C"])
+    _ensure_default(f"{prefix}_sd_last", "C")
 
-def _d0_mu_changed():
-    st.session_state["d0_sd_val"] = round(st.session_state["d0_mu_val"] * 0.2, 6)
+    c1, c2 = st.columns(2)
+    with c1:
+        sC = st.number_input("σ (°C)", min_value=0.0, key=f"{prefix}_sd_C_input", value=float(st.session_state[f"{prefix}_sd_C"]))
+    with c2:
+        sK = st.number_input("σ (K)",  min_value=0.0, key=f"{prefix}_sd_K_input", value=float(st.session_state[f"{prefix}_sd_K"]))
+
+    if sC != st.session_state[f"{prefix}_sd_C"]:
+        st.session_state[f"{prefix}_sd_last"] = "C"
+        st.session_state[f"{prefix}_sd_C"] = float(sC)
+        st.session_state[f"{prefix}_sd_K"] = float(sC)         # 强制相等
+    elif sK != st.session_state[f"{prefix}_sd_K"]:
+        st.session_state[f"{prefix}_sd_last"] = "K"
+        st.session_state[f"{prefix}_sd_K"] = float(sK)
+        st.session_state[f"{prefix}_sd_C"] = float(sK)         # 强制相等
+
+    return st.session_state[f"{prefix}_sd_C"], st.session_state[f"{prefix}_sd_K"]
 
 # =============================
-# Streamlit App
+# App
 # =============================
 
 def main():
@@ -218,25 +237,24 @@ def main():
     st.title("fib Chloride Ingress – Reliability (Streamlit)")
     st.markdown("---")
 
-    # ===== 两列布局（与现有风格对齐）=====
     left, right = st.columns(2)
 
     with left:
         st.header("Model Parameters")
 
-        # --- Ccrit (locked) ---
+        # Ccrit locked
         st.subheader("Critical Chloride Content (Ccrit) – locked")
         Ccrit_mu = st.number_input("Ccrit μ (wt-%/binder)", value=0.60, disabled=True, key="ccrit_mu")
         Ccrit_sd = st.number_input("Ccrit σ", value=0.15, disabled=True, key="ccrit_sd")
         Ccrit_L  = st.number_input("Ccrit lower bound L", value=0.20, disabled=True, key="ccrit_L")
         Ccrit_U  = st.number_input("Ccrit upper bound U", value=2.00, disabled=True, key="ccrit_U")
 
-        # --- be (locked) ---
+        # be locked
         st.subheader("Temperature coeff (b_e) – locked")
         be_mu = st.number_input("b_e μ", value=4800.0, disabled=True, key="be_mu")
         be_sd = st.number_input("b_e σ", value=700.0, disabled=True, key="be_sd")
 
-        # --- α preset ---
+        # α preset
         st.subheader("Ageing exponent α preset")
         alpha_presets = {
             "Please select": None,
@@ -250,8 +268,7 @@ def main():
         preset_data = alpha_presets[alpha_choice]
         is_custom = (preset_data == "custom")
 
-        if preset_data is None:
-            # empty, locked
+        if preset_data is None:  # empty显示但锁定
             alpha_mu = st.number_input("α μ", value=0.0, disabled=True, key="alpha_empty_mu")
             alpha_sd = st.number_input("α σ", value=0.0, disabled=True, key="alpha_empty_sd")
             alpha_L  = st.number_input("α lower bound L", value=0.0, disabled=True, key="alpha_empty_L")
@@ -268,7 +285,7 @@ def main():
             alpha_L  = st.number_input("α lower bound L", value=float(a_L), disabled=True, key="alpha_locked_L")
             alpha_U  = st.number_input("α upper bound U", value=float(a_U), disabled=True, key="alpha_locked_U")
 
-        # --- t0 preset ---
+        # t0 preset
         st.subheader("Reference age t0 (yr)")
         t0_options = {
             "Please select": None,
@@ -289,15 +306,11 @@ def main():
         Cs_mu = st.number_input("Surface chloride μ (wt-%/binder)", value=3.5, min_value=0.0)
         Cs_sd = st.number_input("Surface chloride σ", value=1.0, min_value=0.0)
 
-        # D0: σ=0.2×μ 自动
-        _ensure_default("d0_mu_val", 10.0)
-        _ensure_default("d0_sd_val", round(st.session_state["d0_mu_val"] * 0.2, 6))
-        D0_mu = st.number_input("DRCM0 μ (×1e-12 m²/s)", min_value=0.0, key="d0_mu_val",
-                                on_change=_d0_mu_changed)
-        st.number_input("DRCM0 σ (×1e-12 m²/s)", value=st.session_state["d0_sd_val"],
-                        disabled=True, key="d0_sd_view",
-                        help="Auto = 0.2 × μ")
-        D0_sd = float(st.session_state["d0_sd_val"])
+        # D0：σ始终=0.2×μ（不靠回调，渲染时实时计算，绝不同步）
+        D0_mu = st.number_input("DRCM0 μ (×1e-12 m²/s)", value=10.0, min_value=0.0, key="d0_mu_val")
+        D0_sd = round(0.2 * float(D0_mu), 6)
+        st.number_input("DRCM0 σ (×1e-12 m²/s)", value=D0_sd, disabled=True, key="d0_sd_view",
+                        help="Auto = 0.2 × μ（本控件只显示）")
 
         cover_mu = st.number_input("Cover μ (mm)", value=50.0, min_value=0.0)
         cover_sd = st.number_input("Cover σ (mm)", value=10.0, min_value=0.0)
@@ -305,7 +318,7 @@ def main():
     with right:
         st.header("Δx, Plot Settings")
 
-        # --- Δx preset ---
+        # Δx preset
         st.subheader("Convection zone Δx")
         dx_display_to_code = {
             "Please select": None,
@@ -316,7 +329,7 @@ def main():
         dx_choice = st.selectbox("Δx mode", list(dx_display_to_code.keys()), key="dx_mode_select")
         dx_mode = dx_display_to_code[dx_choice]
 
-        # 默认可编辑值
+        # 默认
         dx_mu = dx_sd = dx_L = dx_U = 0.0
 
         if dx_mode is None:
@@ -331,56 +344,32 @@ def main():
             st.number_input("Δx upper bound U (mm)", value=0.0, disabled=True, key="dx_zero_U")
             st.info("Δx = 0 for submerged/spray conditions")
         elif dx_mode == "beta_submerged":
-            st.number_input("Δx Beta mean μ (mm)", value=8.9, disabled=True, key="dx_locked_mu")
-            st.number_input("Δx Beta SD σ (mm)", value=5.6, disabled=True, key="dx_locked_sd")
-            st.number_input("Δx lower bound L (mm)", value=0.0, disabled=True, key="dx_locked_L")
-            st.number_input("Δx upper bound U (mm)", value=50.0, disabled=True, key="dx_locked_U")
             dx_mu, dx_sd, dx_L, dx_U = 8.9, 5.6, 0.0, 50.0
-        else:  # beta_tidal 可编辑
+            st.number_input("Δx Beta mean μ (mm)", value=dx_mu, disabled=True, key="dx_locked_mu")
+            st.number_input("Δx Beta SD σ (mm)",   value=dx_sd, disabled=True, key="dx_locked_sd")
+            st.number_input("Δx lower bound L (mm)", value=dx_L, disabled=True, key="dx_locked_L")
+            st.number_input("Δx upper bound U (mm)", value=dx_U, disabled=True, key="dx_locked_U")
+        else:  # beta_tidal
             dx_mu = st.number_input("Δx Beta mean μ (mm)", value=10.0, min_value=0.0, key="dx_tidal_mu")
-            dx_sd = st.number_input("Δx Beta SD σ (mm)", value=5.0, min_value=0.0, key="dx_tidal_sd")
+            dx_sd = st.number_input("Δx Beta SD σ (mm)",   value=5.0,  min_value=0.0, key="dx_tidal_sd")
             dx_L  = st.number_input("Δx lower bound L (mm)", value=0.0, min_value=0.0, key="dx_tidal_L")
             dx_U  = st.number_input("Δx upper bound U (mm)", value=50.0, min_value=0.0, key="dx_tidal_U")
 
-        # --- 温度（°C↔K & σ一致） ---
+        # 温度（按你原来 273 的换算）
         st.subheader("Temperature")
-        # 初始化默认
-        _ensure_default("Treal_C", 20.0)
-        _ensure_default("Treal_K", st.session_state["Treal_C"] + 273.15)
-        _ensure_default("Treal_last", "C")
-        _ensure_default("Treal_sd_C", 5.0)
-        _ensure_default("Treal_sd_K", st.session_state["Treal_sd_C"])
-        _ensure_default("Treal_sd_last", "C")
-
-        _ensure_default("Tref_C", 23.0)
-        _ensure_default("Tref_K", st.session_state["Tref_C"] + 273.15)
-        _ensure_default("Tref_last", "C")
-
         st.write("**Actual temperature (mean)**")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.number_input("°C", key="Treal_C", on_change=_edit_C, args=("Treal",))
-        with c2:
-            st.number_input("K",  key="Treal_K", on_change=_edit_K, args=("Treal",))
+        Treal_C, Treal_K = _temp_block("Treal", label_c="°C", label_k="K", use_273=True)
 
         st.write("**Actual temperature (std dev)**")
-        c3, c4 = st.columns(2)
-        with c3:
-            st.number_input("σ (°C)", min_value=0.0, key="Treal_sd_C", on_change=_edit_sd_C, args=("Treal",))
-        with c4:
-            st.number_input("σ (K)",  min_value=0.0, key="Treal_sd_K", on_change=_edit_sd_K, args=("Treal",))
+        Treal_sd_C, Treal_sd_K = _sigma_equal_block("Treal")  # 强制相等
 
         st.write("**Reference temperature**")
-        c5, c6 = st.columns(2)
-        with c5:
-            st.number_input("Tref (°C)", key="Tref_C", on_change=_edit_C, args=("Tref",))
-        with c6:
-            st.number_input("Tref (K)",  key="Tref_K", on_change=_edit_K, args=("Tref",))
+        Tref_C, Tref_K = _temp_block("Tref", label_c="Tref (°C)", label_k="Tref (K)", use_273=True)
 
-        # 供模型使用（全部K）
-        Treal_mu = float(st.session_state["Treal_K"])
-        Treal_sd = float(st.session_state["Treal_sd_K"])
-        Tref     = float(st.session_state["Tref_K"])
+        # 供模型：全部用 K
+        Treal_mu = float(Treal_K)
+        Treal_sd = float(Treal_sd_K)
+        Tref     = float(Tref_K)
 
         st.markdown("---")
         st.subheader("Time window & Monte Carlo")
@@ -395,7 +384,7 @@ def main():
 
         st.markdown("---")
         st.subheader("Target Reliability Index")
-        beta_target = st.number_input("Target β value (blank=ignore -> 用0表示忽略)", value=0.0, min_value=0.0)
+        beta_target = st.number_input("Target β value (0 = ignore)", value=0.0, min_value=0.0)
         show_beta_target = st.checkbox("Show target β on plot", value=False)
 
         st.markdown("---")
@@ -416,7 +405,6 @@ def main():
     st.markdown("---")
     if st.button("Run Simulation", type="primary"):
         try:
-            # 校验 presets 选择
             if alpha_choice == "Please select":
                 st.error("Please select an α preset.")
                 st.stop()
@@ -427,7 +415,7 @@ def main():
                 st.error("Please select a Δx mode.")
                 st.stop()
 
-            # 取 α 参数
+            # α
             if alpha_presets[alpha_choice] == "custom":
                 alpha_mu_val = float(st.session_state["alpha_custom_mu"])
                 alpha_sd_val = float(st.session_state["alpha_custom_sd"])
@@ -443,8 +431,17 @@ def main():
                 alpha_L_val  = float(a_L)
                 alpha_U_val  = float(a_U)
 
-            # 取 Δx
-            if dx_mode is None:
+            # Δx 参数（即便 locked 也确保传正确值）
+            if dx_mode == "beta_submerged":
+                dx_mu_val, dx_sd_val, dx_L_val, dx_U_val = 8.9, 5.6, 0.0, 50.0
+            elif dx_mode == "beta_tidal":
+                dx_mu_val = float(st.session_state.get("dx_tidal_mu", 10.0))
+                dx_sd_val = float(st.session_state.get("dx_tidal_sd", 5.0))
+                dx_L_val  = float(st.session_state.get("dx_tidal_L", 0.0))
+                dx_U_val  = float(st.session_state.get("dx_tidal_U", 50.0))
+            elif dx_mode == "zero":
+                dx_mu_val = dx_sd_val = dx_L_val = dx_U_val = 0.0
+            else:
                 st.error("Invalid Δx mode.")
                 st.stop()
 
@@ -464,8 +461,8 @@ def main():
                 "dx_mode": dx_mode,
             }
             if dx_mode in ("beta_submerged", "beta_tidal"):
-                params.update({"dx_mu": float(dx_mu), "dx_sd": float(dx_sd),
-                               "dx_L": float(dx_L), "dx_U": float(dx_U)})
+                params.update({"dx_mu": dx_mu_val, "dx_sd": dx_sd_val,
+                               "dx_L": dx_L_val, "dx_U": dx_U_val})
 
             if t_end <= t_start:
                 st.error("Plot end time must be greater than plot start time.")
@@ -479,7 +476,6 @@ def main():
                 st.error("Display window has no points; increase number of time points or adjust times.")
                 st.stop()
 
-            # 轴配置（0 表示 auto）
             axes_cfg = {
                 "x_tick": x_tick if x_tick > 0 else None,
                 "y1_min": y1_min if not (y1_min == 0 and y1_max == 0) else None,
@@ -490,30 +486,21 @@ def main():
                 "y2_tick": y2_tick if y2_tick > 0 else None,
             }
 
-            # 目标β
             beta_target_val = None if (not show_beta_target or beta_target == 0.0) else float(beta_target)
 
-            # 绘图
             fig = plot_beta(
                 df_window, t_end=float(t_end), axes_cfg=axes_cfg, show_pf=show_pf,
                 beta_target=beta_target_val, show_beta_target=show_beta_target
             )
             st.pyplot(fig)
 
-            # 表格 + 下载
             st.subheader("Results (first 20 rows)")
             st.dataframe(df_window.head(20), use_container_width=True)
 
             csv = df_window.to_csv(index=False)
-            st.download_button(
-                label="Download CSV",
-                data=csv,
-                file_name="fib_output.csv",
-                mime="text/csv",
-            )
+            st.download_button("Download CSV", data=csv, file_name="fib_output.csv", mime="text/csv")
 
             st.success("Simulation completed.")
-
         except Exception as e:
             st.error(f"Invalid input: {e}")
 
