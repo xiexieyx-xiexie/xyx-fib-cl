@@ -1,8 +1,9 @@
-# app.py — updates: α locks on preset, Δx always visible, Axes two-column rows
+# app.py — integrated updates (red target line, white/shadow annotation, Pf display options)
 import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as pe
 import streamlit as st
 from scipy.stats import norm
 from scipy.special import erfc
@@ -94,7 +95,11 @@ def run_fib_chloride(params, N=100000, seed=42, t_start=0.9, t_end=50.0, t_point
     beta = beta_from_pf(Pf)
     return pd.DataFrame({"t_years": t_years, "Pf": Pf, "beta": beta})
 
-def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, show_beta_target=False):
+# ---------- Plotting ----------
+def plot_beta(df_window, t_end, axes_cfg=None,
+              show_pf=True, beta_target=None, show_beta_target=False,
+              pf_mode="overlay"):
+    """Return (fig_beta, (x_years, y_pf))"""
     x_abs = df_window["t_years"].to_numpy()
     y_beta = df_window["beta"].to_numpy()
     y_pf   = df_window["Pf"].to_numpy()
@@ -105,8 +110,10 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, s
     ax1.set_ylabel("Reliability index β(-)")
     ax1.grid(True)
 
+    # Pf overlay mode
+    overlay_pf = (pf_mode == "overlay")
     ax2 = None
-    if show_pf:
+    if show_pf and overlay_pf:
         ax2 = ax1.twinx()
         ax2.plot(x_abs, y_pf, linestyle="--", lw=1.6, label="Pf(t)")
         ax2.set_ylabel("Failure probability Pf(t)")
@@ -126,7 +133,7 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, s
         ymin, ymax = ax1.get_ylim()
         ax1.set_yticks(np.arange(ymin, ymax + 1e-12, y1_tick))
 
-    if show_pf and ax2 is not None:
+    if ax2 is not None:
         y2_min = axes_cfg.get("y2_min", None)
         y2_max = axes_cfg.get("y2_max", None)
         y2_tick = axes_cfg.get("y2_tick", None)
@@ -138,8 +145,9 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, s
 
     ax1.axvline(float(t_end), linestyle=":", lw=1.5)
 
-    if show_beta_target and beta_target is not None:
-        ax1.axhline(beta_target, linestyle='--', lw=1.5, label=f"Target β = {beta_target}")
+    # Target β line + annotation (red line, white box with shadow, only "Year reached")
+    if show_beta_target and (beta_target is not None):
+        ax1.axhline(beta_target, color="red", linestyle="--", lw=1.6)  # red target line
         crossing_year = None
         for i in range(len(y_beta) - 1):
             if (y_beta[i] - beta_target) * (y_beta[i+1] - beta_target) <= 0:
@@ -148,19 +156,29 @@ def plot_beta(df_window, t_end, axes_cfg=None, show_pf=True, beta_target=None, s
                 if (b2 - b1) != 0:
                     crossing_year = t1 + (beta_target - b1) * (t2 - t1) / (b2 - b1)
                 break
-        textstr = f"Target β = {beta_target:.2f}"
+
+        msg = f"Year reached: {crossing_year:.2f} yr" if crossing_year is not None else "Year reached: —"
+        txt = ax1.text(
+            0.98, 0.98, msg, transform=ax1.transAxes, fontsize=10,
+            va='top', ha='right',
+            bbox=dict(boxstyle='round,pad=0.35', facecolor='white', edgecolor='#333333', alpha=0.98)
+        )
+        # subtle drop shadow
+        txt.set_path_effects([pe.withSimplePatchShadow(offset=(2, -2), shadow_rgbFace=(0, 0, 0), alpha=0.18)])
         if crossing_year is not None:
-            textstr += f"\nYear reached: {crossing_year:.2f} yr"
-            ax1.axvline(crossing_year, linestyle=':', lw=1.0, alpha=0.7)
-        else:
-            textstr += "\nNot reached in time range"
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
-        ax1.text(0.98, 0.98, textstr, transform=ax1.transAxes, fontsize=10,
-                 va='top', ha='right', bbox=props)
-        ax1.legend(loc='upper left')
+            ax1.axvline(crossing_year, color='red', linestyle=':', lw=1.0, alpha=0.7)
 
     fig.tight_layout()
-    return fig
+    return fig, (x_abs, y_pf)
+
+def plot_pf_only(x_years, y_pf):
+    fig_pf, ax = plt.subplots(figsize=(8, 4.6))
+    ax.plot(x_years, y_pf, lw=2)
+    ax.set_xlabel("Time (yr)")
+    ax.set_ylabel("Failure probability Pf(t)")
+    ax.grid(True)
+    fig_pf.tight_layout()
+    return fig_pf
 
 # ---------- Helpers ----------
 def help_badge(title_key: str, default_text: str = ""):
@@ -176,7 +194,7 @@ def help_badge(title_key: str, default_text: str = ""):
                                    key=f"help_img_{title_key}")
             if img: st.image(img, use_container_width=True)
     else:
-        with st.expander("？"):
+        with st.expander("Help"):
             st.caption(f"Help – {title_key}")
             st.session_state.setdefault(f"help_text_{title_key}", default_text)
             st.session_state[f"help_text_{title_key}"] = st.text_area(
@@ -196,12 +214,12 @@ def sync_ck_pair(label_left, label_right, key_c, key_k, default_c=None, default_
     def _on_c_change():
         try:
             c = st.session_state[key_c]
-            if c is not None: st.session_state[key_k] = float(c) + 273
+            if c is not None: st.session_state[key_k] = float(c) + 273.15
         except Exception: pass
     def _on_k_change():
         try:
             k = st.session_state[key_k]
-            if k is not None: st.session_state[key_c] = float(k) - 273
+            if k is not None: st.session_state[key_c] = float(k) - 273.15
         except Exception: pass
     with c1:
         st.number_input(label_left, key=key_c,
@@ -212,17 +230,15 @@ def sync_ck_pair(label_left, label_right, key_c, key_k, default_c=None, default_
                         value=st.session_state.get(key_k, default_k),
                         on_change=_on_k_change)
 
-# ---------- Page ----------
+# ---------- Page layout (same as your latest version above this point) ----------
 st.title("fib chloride ingress – reliability index vs time")
 left_col, right_col = st.columns([1.1, 1.0], vertical_alignment="top")
 
-# ===== LEFT: Model → α → t0 → Editable (single-column sections) =====
+# ===== LEFT: Model → α (locks) → t0 → Editable (all single-column) =====
 with left_col:
-    # Model Parameters (Locked)
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Model Parameters")
     with hdr[1]: help_badge("Model Parameters", "Ccrit and b_e are locked.")
-
     st.markdown("**🔒 Critical Chloride Content (Ccrit) – Locked**")
     Ccrit_mu = st.number_input("Ccrit μ (wt-%/binder)", value=0.60, disabled=True)
     Ccrit_sd = st.number_input("Ccrit σ", value=0.15, disabled=True)
@@ -235,7 +251,6 @@ with left_col:
 
     st.divider()
 
-    # Ageing Exponent (α) — locks on preset
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Ageing Exponent (α)")
     with hdr[1]: help_badge("Ageing Exponent (α)", "Choose a preset to lock fields; Custom unlocks.")
@@ -250,7 +265,6 @@ with left_col:
     alpha_choice = st.selectbox("α preset", list(alpha_presets.keys()), index=0)
     preset_vals = alpha_presets.get(alpha_choice)
     is_locked = preset_vals is not None and alpha_choice != "Please select"
-
     if is_locked:
         mu_def, sd_def, L_def, U_def = preset_vals
         alpha_mu = st.number_input("α μ", value=float(mu_def), disabled=True)
@@ -258,7 +272,6 @@ with left_col:
         alpha_L  = st.number_input("α lower bound L", value=float(L_def), disabled=True)
         alpha_U  = st.number_input("α upper bound U", value=float(U_def), disabled=True)
     else:
-        # editable when Custom or Please select
         alpha_mu = st.number_input("α μ", value=0.50)
         alpha_sd = st.number_input("α σ", value=0.15)
         alpha_L  = st.number_input("α lower bound L", value=0.0)
@@ -266,7 +279,6 @@ with left_col:
 
     st.divider()
 
-    # Reference Age (t0) — compact decimals
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Reference Age (t0)")
     with hdr[1]: help_badge("Reference Age (t0)", "Pick a common age or enter custom.")
@@ -285,7 +297,6 @@ with left_col:
 
     st.divider()
 
-    # Editable Parameters
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Editable Parameters")
     with hdr[1]: help_badge("Editable Parameters", "C0, surface chloride, DRCM0, cover.")
@@ -299,7 +310,6 @@ with left_col:
 
 # ===== RIGHT: Δx (always shown) → Temperature (2-col) → Time Window (2-col) → Target β → Axes (2-col rows) =====
 with right_col:
-    # Convection Zone (Δx) — always visible
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Convection Zone (Δx)")
     with hdr[1]: help_badge("Convection Zone (Δx)", "Zero shows disabled zeros; submerged locked; tidal editable.")
@@ -311,8 +321,6 @@ with right_col:
     }
     dx_choice = st.selectbox("Δx mode", list(dx_display_to_code.keys()), index=0)
     dx_mode_internal = dx_display_to_code.get(dx_choice, None)
-
-    # defaults + disable logic
     if dx_mode_internal == "zero":
         dx_mu_val, dx_sd_val, dx_L_val, dx_U_val = 0.0, 0.0, 0.0, 0.0
         disabled = True
@@ -325,7 +333,6 @@ with right_col:
     else:
         dx_mu_val, dx_sd_val, dx_L_val, dx_U_val = 0.0, 0.0, 0.0, 0.0
         disabled = True
-
     dx_mu = st.number_input("Δx mean μ (mm)", value=float(dx_mu_val), disabled=disabled)
     dx_sd = st.number_input("Δx SD σ (mm)", value=float(dx_sd_val), disabled=disabled)
     dx_L  = st.number_input("Δx lower bound L (mm)", value=float(dx_L_val), disabled=disabled)
@@ -333,7 +340,6 @@ with right_col:
 
     st.divider()
 
-    # Temperature — two columns
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Temperature Parameters")
     with hdr[1]: help_badge("Temperature Parameters", "Two-column C/K inputs with sync; σ same value.")
@@ -347,7 +353,6 @@ with right_col:
 
     st.divider()
 
-    # Time Window & Monte Carlo — two columns
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Time Window & Monte Carlo")
     with hdr[1]: help_badge("Time Window & Monte Carlo", "Left: window; Right: samples/seed.")
@@ -362,40 +367,37 @@ with right_col:
 
     st.divider()
 
-    # Target β — single column
     hdr = st.columns([0.9, 0.1])
     with hdr[0]: st.subheader("Target Reliability Index")
-    with hdr[1]: help_badge("Target Reliability Index", "Draw a target β line and annotate crossing year.")
+    with hdr[1]: help_badge("Target Reliability Index", "Red target line; annotation shows only the year.")
     beta_target      = st.number_input("Target β value (optional)", value=3.80)
-    show_beta_target = st.checkbox("Show target β on plot", value=True)
+    show_beta_target = st.checkbox("Show target β line", value=True)
 
     st.divider()
 
-    # Plot Axes Controls — TWO-COLUMN rows as specified
-    hdr = st.columns([0.9, 0.1])
-    with hdr[0]: st.subheader("Plot Axes Controls")
-    with hdr[1]: help_badge("Plot Axes Controls", "Exact two-column row layout per spec.")
+    # --- Pf display choice ---
+    pf_mode = st.radio(
+        "Pf display mode",
+        options=["Overlay on β figure", "Separate Pf figure"],
+        index=0, horizontal=True
+    )
 
-    # Row 1: X tick step (years) — single full-width
+    # --- Plot Axes Controls (two-column rows) ---
+    st.subheader("Plot Axes Controls")
+    # Row 1
     x_tick = st.number_input("X tick step (years)", value=10.0)
-
-    # Row 2: Y1 tick step — single full-width
+    # Row 2
     y1_tick = st.number_input("Y₁ (β) tick step", value=1.0)
-
-    # Row 3: Y1 min | max — two columns
+    # Row 3
     r3c1, r3c2 = st.columns(2)
     with r3c1: y1_min = st.number_input("Y₁ (β) min", value=-2.0)
     with r3c2: y1_max = st.number_input("Y₁ (β) max", value=5.0)
-
-    # Row 4: Y2 tick step — single full-width
+    # Row 4
     y2_tick = st.number_input("Y₂ (Pf) tick step", value=0.1)
-
-    # Row 5: Y2 min | max — two columns
+    # Row 5
     r5c1, r5c2 = st.columns(2)
     with r5c1: y2_min = st.number_input("Y₂ (Pf) min", value=0.0)
     with r5c2: y2_max = st.number_input("Y₂ (Pf) max", value=1.0)
-
-    show_pf = st.checkbox("Show Pf (failure probability) curve", value=True)
 
     st.divider()
 
@@ -458,13 +460,21 @@ with right_col:
                         "y2_max":  float(y2_max) if y2_max is not None else None,
                         "y2_tick": float(y2_tick) if y2_tick is not None else None,
                     }
-                    fig = plot_beta(
-                        df_window, t_end=float(t_end),
-                        axes_cfg=axes_cfg, show_pf=bool(show_pf),
+                    fig, (x_pf, y_pf) = plot_beta(
+                        df_window,
+                        t_end=float(t_end),
+                        axes_cfg=axes_cfg,
+                        show_pf=True,  # overlay is controlled by pf_mode inside
                         beta_target=float(beta_target) if beta_target is not None else None,
                         show_beta_target=bool(show_beta_target),
+                        pf_mode=("overlay" if pf_mode == "Overlay on β figure" else "separate"),
                     )
                     st.pyplot(fig)
+
+                    if pf_mode == "Separate Pf figure":
+                        fig_pf = plot_pf_only(x_pf, y_pf)
+                        st.pyplot(fig_pf)
+
                     st.download_button(
                         "Download window data (CSV)",
                         data=df_window.to_csv(index=False).encode("utf-8"),
