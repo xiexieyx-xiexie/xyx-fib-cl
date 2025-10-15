@@ -179,20 +179,20 @@ def main():
     # Custom CSS to make inputs narrower
     st.markdown("""
         <style>
-        /* Make number inputs narrower */
+        /* Make number inputs narrower - 1/5 width */
         div[data-testid="stNumberInput"] > div > div > input {
-            width: 33% !important;
-            min-width: 150px !important;
+            width: 20% !important;
+            min-width: 120px !important;
         }
         /* Make text inputs narrower */
         div[data-testid="stTextInput"] > div > div > input {
-            width: 33% !important;
-            min-width: 150px !important;
+            width: 20% !important;
+            min-width: 120px !important;
         }
         /* Make selectbox narrower */
         div[data-testid="stSelectbox"] > div > div {
-            width: 33% !important;
-            min-width: 200px !important;
+            width: 30% !important;
+            min-width: 180px !important;
         }
         /* Adjust font sizes for better readability */
         .stMarkdown, .stText {
@@ -290,13 +290,20 @@ def main():
                 st.write("- 90 days: Long-term assessment")
         
         t0_options = {
+            "Please select": None,
             "0.0767 – 28 days": 0.0767,
             "0.1533 – 56 days": 0.1533,
             "0.2464 – 90 days": 0.2464,
         }
-        t0_choice = st.selectbox("Reference age t0 (yr)", list(t0_options.keys()))
-        t0 = t0_options[t0_choice]
-        st.text(f"t0 = {t0} years")
+        t0_choice = st.selectbox("Reference age t0 (yr)", list(t0_options.keys()), key="t0_select")
+        
+        # Show t0 value in input box
+        if t0_options[t0_choice] is None:
+            t0 = st.number_input("t0 value (years)", value=0.0, disabled=True, key="t0_value", 
+                                help="Select a reference age option above")
+        else:
+            t0 = st.number_input("t0 value (years)", value=t0_options[t0_choice], disabled=True, 
+                                key="t0_value", help="Reference age in years")
         
         # Editable parameters
         st.subheader("✏️ Editable Parameters")
@@ -305,9 +312,10 @@ def main():
         Cs_mu = st.number_input("Surface chloride μ (wt-%/binder)", value=3.5, min_value=0.0)
         Cs_sd = st.number_input("Surface chloride σ", value=1.0, min_value=0.0)
         
-        D0_mu = st.number_input("DRCM0 μ (×1e-12 m²/s)", value=10.0, min_value=0.0)
+        D0_mu = st.number_input("DRCM0 μ (×1e-12 m²/s)", value=10.0, min_value=0.0, key="d0_mu")
         D0_sd = D0_mu * 0.2
-        st.text(f"DRCM0 σ = {D0_sd:.2f} (auto: 0.2×μ)")
+        st.number_input("DRCM0 σ (×1e-12 m²/s)", value=D0_sd, disabled=True, key="d0_sd",
+                       help="Auto-calculated as 0.2 × μ")
         
         cover_mu = st.number_input("Cover μ (mm)", value=50.0, min_value=0.0)
         cover_sd = st.number_input("Cover σ (mm)", value=10.0, min_value=0.0)
@@ -510,6 +518,12 @@ def main():
             if dx_choice == "Please select":
                 st.error("❌ Please select a Δx mode")
                 return
+            
+            # Get the actual t0 value
+            if t0_options[t0_choice] is None:
+                st.error("❌ Please select a valid reference age t0")
+                return
+            t0 = t0_options[t0_choice]
             
             with st.spinner("Running simulation... This may take a moment."):
                 # Prepare parameters
