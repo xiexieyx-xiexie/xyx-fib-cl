@@ -233,7 +233,7 @@ def sync_ck_pair(label_left, label_right, key_c, key_k, default_c=None, default_
                         on_change=_on_k_change)
 
 # GUI design
-st.title("fib chloride ingress – reliability index vs time")
+st.title("fib chloride ingress service life model")
 left_col, right_col = st.columns([1.1, 1.0], vertical_alignment="top")
 
 with left_col:
@@ -480,3 +480,4 @@ with right_col:
                     )
             except Exception as e:
                 st.error(f"Invalid input or computation error: {e}")
+
