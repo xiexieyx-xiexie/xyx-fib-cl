@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Browser-based fib chloride ingress service-life reliability model."
+    />
+    <title>fib Chloride Ingress Reliability</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b756d'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='Georgia' font-size='38' fill='white'%3E%CE%B2%3C/text%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Service-life modelling</p>
+          <h1>fib chloride ingress reliability</h1>
+          <p class="hero-copy">
+            Monte Carlo assessment of chloride-induced reinforcement corrosion, calculated
+            locally in your browser.
+          </p>
+        </div>
+        <div class="hero-badge">
+          <span>fib model</span>
+          <strong>β(t) + Pf(t)</strong>
+        </div>
+      </header>
+
+      <main>
+        <form id="model-form">
+          <div class="form-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">Inputs</p>
+                  <h2>Material & geometry</h2>
+                </div>
+                <span class="status-pill">SI units</span>
+              </div>
+
+              <details class="input-group" open>
+                <summary>
+                  <span>Locked model parameters</span>
+                  <small>fib defaults</small>
+                </summary>
+                <div class="group-body">
+                  <div class="subheading">Critical chloride content</div>
+                  <div class="field-grid four">
+                    <label>Ccrit μ<input id="Ccrit_mu" type="number" value="0.60" disabled /></label>
+                    <label>Ccrit σ<input id="Ccrit_sd" type="number" value="0.15" disabled /></label>
+                    <label>Lower L<input id="Ccrit_L" type="number" value="0.20" disabled /></label>
+                    <label>Upper U<input id="Ccrit_U" type="number" value="2.00" disabled /></label>
+                  </div>
+                  <div class="subheading">Temperature coefficient</div>
+                  <div class="field-grid two">
+                    <label>bₑ μ<input id="be_mu" type="number" value="4800" disabled /></label>
+                    <label>bₑ σ<input id="be_sd" type="number" value="700" disabled /></label>
+                  </div>
+                </div>
+              </details>
+
+              <details class="input-group" open>
+                <summary>
+                  <span>Ageing exponent α</span>
+                  <small>preset or custom</small>
+                </summary>
+                <div class="group-body">
+                  <label class="field-wide">
+                    α preset
+                    <select id="alpha_preset" required>
+                      <option value="">Please select</option>
+                      <option value="pcc">Portland Cement (PCC)</option>
+                      <option value="fly-ash">PCC + ≥20% Fly Ash</option>
+                      <option value="bfs">PCC + BFS</option>
+                      <option value="atmospheric">All types (atmospheric)</option>
+                      <option value="custom">Custom values</option>
+                    </select>
+                  </label>
+                  <div class="field-grid four">
+                    <label>α μ<input id="alpha_mu" type="number" step="any" value="0.50" /></label>
+                    <label>α σ<input id="alpha_sd" type="number" step="any" value="0.15" /></label>
+                    <label>Lower L<input id="alpha_L" type="number" step="any" value="0" /></label>
+                    <label>Upper U<input id="alpha_U" type="number" step="any" value="1" /></label>
+                  </div>
+                </div>
+              </details>
+
+              <details class="input-group" open>
+                <summary>
+                  <span>Reference age t0</span>
+                  <small>years</small>
+                </summary>
+                <div class="group-body">
+                  <div class="field-grid two">
+                    <label>
+                      Common age
+                      <select id="t0_preset">
+                        <option value="">Custom</option>
+                        <option value="0.0767">28 days</option>
+                        <option value="0.1533">56 days</option>
+                        <option value="0.2464">90 days</option>
+                      </select>
+                    </label>
+                    <label>t0 value<input id="t0" type="number" step="0.0001" value="0.0767" /></label>
+                  </div>
+                </div>
+              </details>
+
+              <details class="input-group" open>
+                <summary>
+                  <span>Editable parameters</span>
+                  <small>chloride, diffusion, cover</small>
+                </summary>
+                <div class="group-body">
+                  <div class="field-grid two">
+                    <label>Initial chloride C0<input id="C0" type="number" step="any" value="0" /></label>
+                    <label>Surface chloride μ<input id="Cs_mu" type="number" step="any" value="1.8" /></label>
+                    <label>Surface chloride σ<input id="Cs_sd" type="number" step="any" value="0.3" /></label>
+                    <label>DRCM0 μ (×10⁻¹² m²/s)<input id="D0_mu" type="number" step="any" value="10" /></label>
+                    <label>DRCM0 σ<input id="D0_sd" type="number" step="any" value="2" disabled /></label>
+                    <label>Cover μ (mm)<input id="cover_mu" type="number" step="any" value="50" /></label>
+                    <label>Cover σ (mm)<input id="cover_sd" type="number" step="any" value="7" /></label>
+                  </div>
+                </div>
+              </details>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">Scenario</p>
+                  <h2>Exposure & analysis</h2>
+                </div>
+                <span class="status-pill accent">Monte Carlo</span>
+              </div>
+
+              <details class="input-group" open>
+                <summary>
+                  <span>Convection zone Δx</span>
+                  <small>mm</small>
+                </summary>
+                <div class="group-body">
+                  <label class="field-wide">
+                    Exposure mode
+                    <select id="dx_mode" required>
+                      <option value="">Please select</option>
+                      <option value="zero">Zero – submerged/spray</option>
+                      <option value="beta_submerged">Beta – submerged (locked)</option>
+                      <option value="beta_tidal">Beta – tidal (editable)</option>
+                    </select>
+                  </label>
+                  <div class="field-grid four">
+                    <label>Δx μ<input id="dx_mu" type="number" step="any" value="0" disabled /></label>
+                    <label>Δx σ<input id="dx_sd" type="number" step="any" value="0" disabled /></label>
+                    <label>Lower L<input id="dx_L" type="number" step="any" value="0" disabled /></label>
+                    <label>Upper U<input id="dx_U" type="number" step="any" value="0" disabled /></label>
+                  </div>
+                </div>
+              </details>
+
+              <details class="input-group" open>
+                <summary>
+                  <span>Temperature</span>
+                  <small>°C / K linked</small>
+                </summary>
+                <div class="group-body">
+                  <div class="subheading">Actual temperature</div>
+                  <div class="field-grid two">
+                    <label>Mean (°C)<input id="Treal_mu_C" type="number" step="any" value="23" /></label>
+                    <label>Mean (K)<input id="Treal_mu_K" type="number" step="any" value="296.15" /></label>
+                    <label>σ (°C)<input id="Treal_sd_C" type="number" step="any" value="3" /></label>
+                    <label>σ (K)<input id="Treal_sd_K" type="number" step="any" value="3" /></label>
+                  </div>
+                  <div class="subheading">Reference temperature</div>
+                  <div class="field-grid two">
+                    <label>Tref (°C)<input id="Tref_C" type="number" step="any" value="23" /></label>
+                    <label>Tref (K)<input id="Tref_K" type="number" step="any" value="296.15" /></label>
+                  </div>
+                </div>
+              </details>
+
+              <details class="input-group" open>
+                <summary>
+                  <span>Time window & simulation</span>
+                  <small>resolution</small>
+                </summary>
+                <div class="group-body">
+                  <div class="field-grid two">
+                    <label>Display start (yr)<input id="t_start" type="number" step="any" value="0.9" /></label>
+                    <label>Target end (yr)<input id="t_end" type="number" min="0.1" step="any" value="50" /></label>
+                    <label>Time points<input id="t_points" type="number" min="10" step="10" value="200" /></label>
+                    <label>Samples N<input id="samples" type="number" min="1000" step="1000" value="100000" /></label>
+                    <label>Random seed<input id="seed" type="number" step="1" value="42" /></label>
+                  </div>
+                </div>
+              </details>
+
+              <details class="input-group">
+                <summary>
+                  <span>Chart controls</span>
+                  <small>axes & target</small>
+                </summary>
+                <div class="group-body">
+                  <div class="field-grid two">
+                    <label>Target β<input id="beta_target" type="number" step="any" value="3.8" /></label>
+                    <label class="checkbox-field">
+                      <input id="show_beta_target" type="checkbox" checked />
+                      Show target β
+                    </label>
+                    <label>
+                      Pf display
+                      <select id="pf_mode">
+                        <option value="overlay">Overlay on β chart</option>
+                        <option value="separate">Separate Pf chart</option>
+                      </select>
+                    </label>
+                    <label>X tick (yr)<input id="x_tick" type="number" step="any" value="10" /></label>
+                    <label>β min<input id="beta_min" type="number" step="any" value="-2" /></label>
+                    <label>β max<input id="beta_max" type="number" step="any" value="5" /></label>
+                    <label>β tick<input id="beta_tick" type="number" step="any" value="1" /></label>
+                    <label>Pf min<input id="pf_min" type="number" step="any" value="0" /></label>
+                    <label>Pf max<input id="pf_max" type="number" step="any" value="1" /></label>
+                    <label>Pf tick<input id="pf_tick" type="number" step="any" value="0.1" /></label>
+                  </div>
+                </div>
+              </details>
+
+              <div class="run-card">
+                <div>
+                  <span class="run-label">Ready to calculate</span>
+                  <p>All simulation data stays on this device.</p>
+                </div>
+                <button id="run-button" type="submit">
+                  <span>Run simulation</span>
+                  <span aria-hidden="true">→</span>
+                </button>
+              </div>
+              <div id="error-message" class="message error" role="alert" hidden></div>
+            </section>
+          </div>
+        </form>
+
+        <section id="results" class="results-section" aria-live="polite">
+          <div class="results-heading">
+            <div>
+              <p class="section-kicker">Output</p>
+              <h2>Reliability over time</h2>
+            </div>
+            <button id="download-button" class="secondary-button" type="button" disabled>
+              Download CSV
+            </button>
+          </div>
+
+          <div id="empty-state" class="empty-state">
+            <div class="empty-graphic" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <h3>No simulation yet</h3>
+            <p>Select an α preset and exposure mode, then run the model.</p>
+          </div>
+
+          <div id="progress-card" class="progress-card" hidden>
+            <div class="progress-copy">
+              <strong>Running Monte Carlo simulation</strong>
+              <span id="progress-label">Preparing samples…</span>
+            </div>
+            <div class="progress-track"><span id="progress-bar"></span></div>
+          </div>
+
+          <div id="result-content" hidden>
+            <div class="metric-grid">
+              <article class="metric-card">
+                <span>β at target year</span>
+                <strong id="metric-beta">–</strong>
+              </article>
+              <article class="metric-card">
+                <span>Pf at target year</span>
+                <strong id="metric-pf">–</strong>
+              </article>
+              <article class="metric-card">
+                <span>Target β reached</span>
+                <strong id="metric-crossing">–</strong>
+              </article>
+              <article class="metric-card">
+                <span>Compute time</span>
+                <strong id="metric-time">–</strong>
+              </article>
+            </div>
+
+            <article class="chart-card">
+              <div class="chart-title-row">
+                <div>
+                  <h3>Reliability index β(t)</h3>
+                  <p>Higher β indicates lower probability of chloride initiation.</p>
+                </div>
+                <div class="legend">
+                  <span><i class="line beta"></i>β(t)</span>
+                  <span id="pf-legend"><i class="line pf"></i>Pf(t)</span>
+                  <span id="target-legend"><i class="line target"></i>Target β</span>
+                </div>
+              </div>
+              <div id="beta-chart" class="chart" role="img" aria-label="Reliability chart"></div>
+            </article>
+
+            <article id="pf-card" class="chart-card" hidden>
+              <div class="chart-title-row">
+                <div>
+                  <h3>Failure probability Pf(t)</h3>
+                  <p>Estimated probability of chloride content exceeding Ccrit.</p>
+                </div>
+              </div>
+              <div id="pf-chart" class="chart" role="img" aria-label="Failure probability chart"></div>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <span>fib chloride ingress service-life model</span>
+        <span>Client-side Monte Carlo calculation</span>
+      </footer>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
